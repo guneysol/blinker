@@ -15,6 +15,8 @@ final class StatusBar: NSObject, NSWindowDelegate {
     private var panel: NSPanel?
     private var outsideClicks: Any?
     private var watching: AnyCancellable?
+    /// True while the settings menu is open, so the panel doesn't close when the menu takes focus.
+    private var settingsOpen = false
 
     init(store: Store) {
         self.store = store
@@ -87,7 +89,10 @@ final class StatusBar: NSObject, NSWindowDelegate {
         effect.wantsLayer = true
         effect.layer?.cornerRadius = 10
         effect.layer?.masksToBounds = true
-        let host = NSHostingView(rootView: MenuView(onSizeChange: { [weak self] in self?.resize() }).environmentObject(store))
+        let host = NSHostingView(rootView: MenuView(
+            onSizeChange: { [weak self] in self?.resize() },
+            onSettings: { [weak self] anchor in self?.showSettings(under: anchor) }
+        ).environmentObject(store))
         host.translatesAutoresizingMaskIntoConstraints = false
         effect.addSubview(host)
         NSLayoutConstraint.activate([
@@ -111,7 +116,59 @@ final class StatusBar: NSObject, NSWindowDelegate {
         panel.setFrame(frame, display: true)
     }
 
-    func windowDidResignKey(_ notification: Notification) { close() }
+    func windowDidResignKey(_ notification: Notification) {
+        if !settingsOpen { close() }
+    }
+
+    // MARK: - Settings
+
+    private func showSettings(under anchor: NSView) {
+        let menu = NSMenu()
+        func add(_ title: String, _ action: Selector, on: Bool? = nil, enabled: Bool = true, link: String? = nil) {
+            let item = NSMenuItem(title: title, action: enabled ? action : nil, keyEquivalent: "")
+            item.target = self
+            if let on { item.state = on ? .on : .off }
+            item.representedObject = link
+            menu.addItem(item)
+        }
+        add("Notifications", #selector(toggleNotify), on: store.notify)
+        add("Notification Sound", #selector(toggleSound), on: store.sound, enabled: store.notify)
+        add("Launch at Login", #selector(toggleLogin), on: store.launchAtLogin)
+        menu.addItem(.separator())
+        add("Send a Test Notification", #selector(sendTest))
+        add("Clear History", #selector(clearHistory), enabled: !store.history.isEmpty)
+        menu.addItem(.separator())
+        add("Follow @guneysol on X", #selector(openLink), link: "https://x.com/guneysol")
+        // X has no link that opens a DM by username, so this opens the profile with its Message button.
+        add("Send Feedback on X…", #selector(openLink), link: "https://x.com/guneysol")
+        add("Star on GitHub", #selector(openLink), link: "https://github.com/guneysol/blinker")
+        add("Report a Bug…", #selector(openLink), link: "https://github.com/guneysol/blinker/issues/new/choose")
+        menu.addItem(.separator())
+        let quit = NSMenuItem(title: "Quit Blinker", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(quit)
+
+        settingsOpen = true
+        // Just below the button. A button's coordinates are flipped (y grows downward), so
+        // "below" is its maxY there; getting this wrong opens the menu into the menu bar,
+        // where macOS clips it and adds a scroll arrow.
+        let below = anchor.isFlipped ? anchor.bounds.maxY + 4 : anchor.bounds.minY - 4
+        menu.popUp(positioning: nil, at: NSPoint(x: anchor.bounds.minX, y: below), in: anchor) // returns when it closes
+        settingsOpen = false
+        panel?.makeKey()
+    }
+
+    @objc private func toggleNotify() { store.notify.toggle() }
+    @objc private func toggleSound() { store.sound.toggle() }
+    @objc private func toggleLogin() { store.setLaunchAtLogin(!store.launchAtLogin) }
+    @objc private func clearHistory() { store.clearHistory() }
+    @objc private func sendTest() {
+        close()
+        store.sendTest()
+    }
+    @objc private func openLink(_ sender: NSMenuItem) {
+        close()
+        if let link = sender.representedObject as? String, let url = URL(string: link) { NSWorkspace.shared.open(url) }
+    }
 }
 
 /// A borderless panel that can take keyboard focus (for the ⋯ menu and Escape).

@@ -15,6 +15,9 @@ struct MenuView: View {
     @State private var showAll = false
     /// Lets the panel follow the content's height (the menu is not a SwiftUI window).
     var onSizeChange: () -> Void = {}
+    /// Opens the settings menu. A native NSMenu, owned by StatusBar: a SwiftUI Menu inside the
+    /// panel closed the panel as it opened, so its items never ran.
+    var onSettings: (NSView) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -61,7 +64,7 @@ struct MenuView: View {
                 .foregroundStyle(.secondary)
                 .accessibilityAddTraits(.isHeader)
             Spacer()
-            SettingsMenu()
+            SettingsButton(action: onSettings)
         }
         .padding(.horizontal, Metrics.inset)
         .padding(.vertical, 1)
@@ -316,37 +319,36 @@ private struct RowButtonStyle: ButtonStyle {
 
 // MARK: - Settings
 
-private struct SettingsMenu: View {
-    @EnvironmentObject var store: Store
+/// The ⋯ button. It hands its own view to StatusBar, which pops the menu up right under it.
+private struct SettingsButton: View {
+    let action: (NSView) -> Void
 
     var body: some View {
-        Menu {
-                Toggle("Notifications", isOn: $store.notify)
-                Toggle("Notification Sound", isOn: $store.sound).disabled(!store.notify)
-                Toggle("Launch at Login", isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
-                Divider()
-                Button("Send a Test Notification") { store.sendTest() }
-                Button("Clear History") { store.clearHistory() }.disabled(store.history.isEmpty)
-                Divider()
-                Button("Follow @guneysol on X") { open("https://x.com/guneysol") }
-                // X has no link that opens a DM by username, so this opens the profile with its Message button.
-                Button("Send Feedback on X…") { open("https://x.com/guneysol") }
-                Button("Star on GitHub") { open("https://github.com/guneysol/blinker") }
-                Button("Report a Bug…") { open("https://github.com/guneysol/blinker/issues/new/choose") }
-                Divider()
-                Button("Quit Blinker") { NSApp.terminate(nil) }.keyboardShortcut("q")
-            } label: {
-                Image(systemName: "ellipsis.circle").font(.system(size: 14))
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .foregroundStyle(.secondary)
+        AnchorButton(action: action)
+            .frame(width: 18, height: 18)
             .help("Settings")
             .accessibilityLabel("Settings")
     }
+}
 
-    private func open(_ link: String) {
-        if let url = URL(string: link) { NSWorkspace.shared.open(url) }
+private struct AnchorButton: NSViewRepresentable {
+    let action: (NSView) -> Void
+
+    func makeNSView(context: Context) -> NSButton {
+        let image = NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: "Settings")?
+            .withSymbolConfiguration(.init(pointSize: 14, weight: .regular))
+        let button = NSButton(image: image ?? NSImage(), target: context.coordinator, action: #selector(Coordinator.click(_:)))
+        button.isBordered = false
+        button.contentTintColor = .secondaryLabelColor
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) { context.coordinator.action = action }
+    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+
+    final class Coordinator: NSObject {
+        var action: (NSView) -> Void
+        init(action: @escaping (NSView) -> Void) { self.action = action }
+        @objc func click(_ sender: NSButton) { action(sender) }
     }
 }

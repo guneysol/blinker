@@ -74,6 +74,7 @@ final class Store: NSObject, ObservableObject, UNUserNotificationCenterDelegate 
     @Published var notify: Bool { didSet { UserDefaults.standard.set(notify, forKey: "notify") } }
     @Published var sound: Bool { didSet { UserDefaults.standard.set(sound, forKey: "sound") } }
     let blink = Blink()
+    private var lastTest: String?
 
     private var watcher: TouchWatcher?
     private let center = UNUserNotificationCenter.current()
@@ -303,7 +304,15 @@ final class Store: NSObject, ObservableObject, UNUserNotificationCenterDelegate 
         content.title = "YubiKey needs a touch (test)"
         content.body = "This is a test. Your key isn't waiting."
         if sound { content.sound = .default }
-        center.add(UNNotificationRequest(identifier: "test", content: content, trigger: nil))
+        // A new identifier each time: re-adding one that's still in Notification Center only
+        // replaces it silently, so a second test would show nothing.
+        center.removeDeliveredNotifications(withIdentifiers: [lastTest].compactMap { $0 })
+        let id = "test-\(UUID().uuidString)"
+        lastTest = id
+        center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil)) { error in
+            if let error { log.error("couldn't post test notification: \(error.localizedDescription, privacy: .public)") }
+            else { log.info("posted test notification") }
+        }
     }
 
     nonisolated func userNotificationCenter(
