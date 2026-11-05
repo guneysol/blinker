@@ -115,6 +115,8 @@ final class Store: NSObject, ObservableObject, UNUserNotificationCenterDelegate 
         ) { [weak self] _ in MainActor.assumeIsolated { self?.retry() } }
     }
 
+    func stop() { watcher?.stop() }
+
     /// Starts watching again after it gave up. Does nothing while it's still watching.
     func retry() {
         guard problem != nil else { return }

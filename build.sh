@@ -38,22 +38,19 @@ codesign --force --options runtime --sign - "$APP" 2>/dev/null
 echo "Built $APP"
 
 relaunch() {
-    # Ask Blinker to quit by bundle id. If it's still running a few seconds later (for example,
-    # it's stuck), stop it: only your own processes named Blinker, and only when the executable
-    # path matches one of ours exactly. Otherwise `open` would just reuse the old instance.
-    osascript -e 'tell application id "io.github.guneysol.blinker" to quit' >/dev/null 2>&1 || true
-    local ours=("/Applications/Blinker.app/Contents/MacOS/Blinker"
-                "$HOME/Applications/Blinker.app/Contents/MacOS/Blinker"
-                "$PWD/build/Blinker.app/Contents/MacOS/Blinker")
-    local pid exe path _
-    sleep 2
+    # Stop the running Blinker, like portside: no AppleScript, so no "wants to control" prompt.
+    # Only your own processes, and only the app itself (its exact path with no arguments), so
+    # an editor or a `Blinker --watch` session is never touched. Blinker exits cleanly on TERM.
+    local pid
     for pid in $(pgrep -U "$(id -u)" -x Blinker); do
-        exe=$(ps -o args= -p "$pid") # the app runs with no arguments; `--watch` sessions are left alone
-        for path in "${ours[@]}"; do
-            [[ "$exe" == "$path" ]] && kill "$pid" 2>/dev/null
-        done
+        case "$(ps -o args= -p "$pid")" in
+            "/Applications/Blinker.app/Contents/MacOS/Blinker" | \
+            "$HOME/Applications/Blinker.app/Contents/MacOS/Blinker" | \
+            "$PWD/build/Blinker.app/Contents/MacOS/Blinker")
+                kill "$pid" 2>/dev/null || true
+                while kill -0 "$pid" 2>/dev/null; do sleep 0.1; done ;;
+        esac
     done
-    sleep 1
     open "$1"
 }
 

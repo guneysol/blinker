@@ -35,6 +35,10 @@ final class TouchWatcher: @unchecked Sendable {
     private var restarts: [Date] = []
     /// True from start() until we give up; covers the backoff gap between restarts too.
     private var active = false
+    private var quitting = false
+
+    /// The exact arguments Blinker runs `log` with, so a leftover copy can be recognized.
+    static let arguments = ["stream", "--level", "debug", "--style", "ndjson", "--predicate", predicate]
 
     /// `onEvent` is called on the main actor.
     init(onEvent: @escaping @MainActor @Sendable (Event) -> Void) {
@@ -51,6 +55,25 @@ final class TouchWatcher: @unchecked Sendable {
         }
     }
 
+    /// Ends the `log stream` helper when the app quits. Without this it would outlive us.
+    func stop() {
+        queue.sync {
+            quitting = true
+            process?.terminate()
+        }
+    }
+
+    /// A `log stream` left behind by a Blinker that was killed (so it couldn't stop it): yours,
+    /// orphaned to launchd, and running exactly our arguments. Nothing else is ever touched.
+    static func endLeftovers() {
+        for p in Processes.table().values where p.ppid == 1 && p.name == "log" {
+            guard Processes.executable(p.pid) == "/usr/bin/log",
+                  Array(Processes.arguments(p.pid).dropFirst()) == arguments else { continue }
+            kill(p.pid, SIGTERM)
+            log.info("ended a leftover log stream, pid \(p.pid, privacy: .public)")
+        }
+    }
+
     private func emit(_ event: Event) {
         let onEvent = self.onEvent
         Task { @MainActor in onEvent(event) }
@@ -59,7 +82,7 @@ final class TouchWatcher: @unchecked Sendable {
     private func launch() {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/log")
-        p.arguments = ["stream", "--level", "debug", "--style", "ndjson", "--predicate", Self.predicate]
+        p.arguments = Self.arguments
         p.environment = ["PATH": "/usr/bin:/bin", "LANG": "en_US.UTF-8"] // nothing inherited
         p.standardInput = FileHandle.nullDevice
         let out = Pipe(), err = Pipe()
@@ -107,6 +130,7 @@ final class TouchWatcher: @unchecked Sendable {
     /// to read the log, say), stop and say why instead of spinning. `start()` tries again.
     private func relaunch(after status: Int32, reason: String) {
         process = nil
+        guard !quitting else { return }
         if waiting { finish() }
         let now = Date()
         restarts = restarts.filter { now.timeIntervalSince($0) < 60 } + [now]

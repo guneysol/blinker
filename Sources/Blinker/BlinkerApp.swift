@@ -33,9 +33,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         withExtendedLifetime(delegate) { app.run() }
     }
 
+    private var terminateSignal: DispatchSourceSignal?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // `build.sh` and `kill` send TERM: quit normally, so the log helper is stopped too.
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { NSApp.terminate(nil) }
+        source.resume()
+        terminateSignal = source
+        TouchWatcher.endLeftovers()
         statusBar = StatusBar(store: store)
         store.start()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        store.stop()
     }
 }
 
