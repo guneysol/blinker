@@ -1,0 +1,29 @@
+name: Bug report
+description: A touch was missed, mislabeled, or Blinker misbehaved
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: What happened?
+      description: What you ran, what you expected Blinker to show, and what it showed instead.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Output of `--watch`
+      description: |
+        Run `/Applications/Blinker.app/Contents/MacOS/Blinker --watch`, reproduce, and paste the output.
+        It includes commands, paths and branch names, so trim anything private.
+      render: text
+  - type: input
+    attributes:
+      label: Blinker version
+      description: Output of `/Applications/Blinker.app/Contents/MacOS/Blinker --version`
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Your setup
+      placeholder: "e.g. YubiKey 5C, gpg-agent for SSH, macOS 26.1"
+    validations:
+      required: true

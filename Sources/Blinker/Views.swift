@@ -1,0 +1,352 @@
+import AppKit
+import SwiftUI
+
+/// Laid out like the system's own menu bar menus (Wi-Fi, Bluetooth): the system font in two
+/// weights, gray symbol circles, hairline dividers, and one colored element: the circle of a
+/// request that is waiting on your key right now.
+private enum Metrics {
+    static let width: CGFloat = 300
+    static let inset: CGFloat = 14
+    static let circle: CGFloat = 26
+}
+
+struct MenuView: View {
+    @EnvironmentObject var store: Store
+    @State private var showAll = false
+    /// Lets the panel follow the content's height (the menu is not a SwiftUI window).
+    var onSizeChange: () -> Void = {}
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let wait = store.current {
+                // Says plainly what this section is, in the same words as the notification.
+                Text("Your key is waiting for a touch")
+                    .font(.system(size: 13, weight: .semibold))
+                    .padding(.horizontal, Metrics.inset)
+                    .padding(.vertical, 3)
+                    .accessibilityAddTraits(.isHeader)
+                Waiting(wait: wait)
+                separator
+            } else if let problem = store.problem {
+                Row(symbol: "exclamationmark.triangle", title: "Not watching your key", detail: problem, wraps: true,
+                    action: ("Try Again", { store.retry() }))
+                separator
+            }
+            if store.notificationsOff {
+                Row(symbol: "bell.slash", title: "Notifications are off",
+                    detail: "Blinker can't alert you until they're on.", wraps: true,
+                    action: ("Turn On", { store.openNotificationSettings() }))
+                separator
+            }
+            if let note = store.launchAtLoginNote {
+                Row(symbol: "power", title: "Launch at Login", detail: note, wraps: true)
+                separator
+            }
+            history
+        }
+        .padding(.vertical, 6)
+        .frame(width: Metrics.width)
+        .onAppear { store.refresh() }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { _ in onSizeChange() }
+    }
+
+    private var separator: some View {
+        Divider().padding(.horizontal, Metrics.inset).padding(.vertical, 5)
+    }
+
+    @ViewBuilder private var history: some View {
+        HStack {
+            Text("Recent")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
+            Spacer()
+            SettingsMenu()
+        }
+        .padding(.horizontal, Metrics.inset)
+        .padding(.vertical, 1)
+        if store.history.isEmpty {
+            Text("No requests yet")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, Metrics.inset)
+                .padding(.vertical, 3)
+        } else {
+            let shown = showAll ? store.history : Array(store.history.prefix(5))
+            // Scrolls once it's taller than about eight rows, so it always fits on screen.
+            ScrollView {
+                VStack(spacing: 0) { ForEach(shown) { HistoryRow(wait: $0) } }
+            }
+            .scrollIndicators(.never)
+            .frame(height: CGFloat(min(shown.count, 8)) * 42)
+            if store.history.count > 5 {
+                Button(showAll ? "Show Less" : "Show All (\(store.history.count))") { showAll.toggle() }
+                    .buttonStyle(RowButtonStyle())
+            }
+        }
+    }
+}
+
+// MARK: - The key is waiting
+
+private struct Waiting: View {
+    @EnvironmentObject var store: Store
+    let wait: Wait
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let likely = wait.likely {
+                HStack(alignment: .center, spacing: 10) {
+                    Circle_(symbol: "key.horizontal.fill", active: true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(likely.title).font(.system(size: 13, weight: .semibold)).lineLimit(2)
+                        Text("\(likely.who ?? "An unrecognized program") is asking").font(.system(size: 11)).foregroundStyle(.secondary)
+                        if let where_ = [likely.place, likely.host].compactMap({ $0 }).first {
+                            Text(where_).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        }
+                        ForEach(likely.warnings, id: \.self) { warning in
+                            Text(warning).font(.system(size: 11)).foregroundStyle(.orange).lineLimit(2)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help("\(likely.headline)\n\(likely.command)")
+                    stop(likely, stopped: wait.stopped.contains(likely.id))
+                }
+                .padding(.horizontal, Metrics.inset)
+                .padding(.vertical, 4)
+                .accessibilityElement(children: .contain)
+            } else {
+                Row(symbol: "key.horizontal.fill", active: true,
+                    title: !wait.looked ? "Checking who asked…" : wait.fresh.isEmpty ? "Unknown program is asking" : "\(wait.fresh.count) programs asked at once",
+                    detail: !wait.looked ? "" : wait.fresh.isEmpty ? "Don't touch your key unless you started something."
+                                                                   : "Blinker can't tell which one asked.",
+                    wraps: true)
+            }
+            ForEach(wait.requests.filter { $0 != wait.likely }) { request in
+                Connected(request: request, idle: wait.idle.contains(request), stopped: wait.stopped.contains(request.id))
+            }
+        }
+    }
+
+    @ViewBuilder private func stop(_ request: Request, stopped: Bool) -> some View {
+        if stopped {
+            Text("Stopped").font(.system(size: 11)).foregroundStyle(.secondary)
+        } else if store.stopFailed == request.id {
+            Text("Couldn't stop").font(.system(size: 11)).foregroundStyle(.secondary)
+        } else {
+            Button("Stop", role: .destructive) { store.stop(request) }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Cancel this request (sends SIGTERM to pid \(request.pid))")
+        }
+    }
+}
+
+/// Another program connected to the agent while the key waits.
+private struct Connected: View {
+    @EnvironmentObject var store: Store
+    let request: Request
+    let idle: Bool
+    let stopped: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle_(symbol: request.symbol)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(request.title).font(.system(size: 13)).lineLimit(1)
+                Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .help("\(request.headline)\n\(request.command)")
+            if !stopped {
+                // Quieter than the main Stop: one prominent action per menu.
+                Button("Stop") { store.stop(request) }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .help("Cancel this connection (sends SIGTERM to pid \(request.pid))")
+            }
+        }
+        .padding(.horizontal, Metrics.inset)
+        .padding(.vertical, 4)
+    }
+
+    private var detail: String {
+        var parts = [request.who ?? "Unrecognized program"]
+        parts.append(idle ? "also connected since \(request.started.formatted(date: .omitted, time: .shortened))" : "also connected")
+        if stopped { parts.append("stopped") }
+        if !request.warnings.isEmpty { parts.append("check this") }
+        if store.stopFailed == request.id { parts.append("couldn't stop") }
+        return parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - History
+
+private struct HistoryRow: View {
+    let wait: Wait
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle_(symbol: wait.likely?.symbol ?? "questionmark")
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 13)).lineLimit(1)
+                Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            TimelineView(.everyMinute) { _ in
+                Text(wait.began, format: .relative(presentation: .numeric, unitsStyle: .narrow))
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .modifier(RowChrome())
+        .help(wait.likely.map { "\($0.headline)\n\($0.command)" } ?? wait.requests.map(\.headline).joined(separator: "\n"))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var title: String {
+        if let likely = wait.likely { return likely.title }
+        return wait.fresh.isEmpty ? "Unknown program" : "\(wait.fresh.count) programs asked at once"
+    }
+
+    private var detail: String {
+        var parts: [String] = []
+        if let likely = wait.likely {
+            parts.append(likely.who ?? "Unrecognized program")
+            if let repo = likely.shortPlace { parts.append(repo) }
+        }
+        if !wait.stopped.isEmpty { parts.append("stopped") }
+        return parts.isEmpty ? "Couldn't tell who asked" : parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - Shared pieces
+
+/// A symbol in a circle, as in the Wi-Fi menu: gray at rest, filled with color when active.
+private struct Circle_: View {
+    let symbol: String
+    var active = false
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(active ? Color.white : Color.secondary)
+            .frame(width: Metrics.circle, height: Metrics.circle)
+            .background(Circle().fill(active ? Color.green : Color.primary.opacity(0.09)))
+            .accessibilityHidden(true)
+    }
+}
+
+private struct Row: View {
+    let symbol: String
+    var active = false
+    let title: String
+    let detail: String
+    var wraps = false
+    var action: (String, () -> Void)? = nil
+
+    var body: some View {
+        HStack(alignment: wraps ? .top : .center, spacing: 10) {
+            Circle_(symbol: symbol, active: active)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 13, weight: active ? .semibold : .regular))
+                if !detail.isEmpty {
+                    Text(detail).font(.system(size: 11)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: wraps)
+                }
+            }
+            Spacer(minLength: 0)
+            if let action {
+                Button(action.0, action: action.1).buttonStyle(.bordered).controlSize(.small)
+            }
+        }
+        .padding(.horizontal, Metrics.inset)
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+extension Request {
+    /// "~/code/acme-web (feat/login)" → "acme-web (feat/login)", for one-line rows.
+    var shortPlace: String? {
+        guard let place else { return nil }
+        let (folder, branch) = place.firstRange(of: " (").map { (String(place[..<$0.lowerBound]), String(place[$0.lowerBound...])) }
+            ?? (place, "")
+        return folder.basename + branch
+    }
+
+    var symbol: String {
+        switch kind {
+        case .push: "arrow.up"
+        case .fetch: "arrow.down"
+        case .sign: "signature"
+        case .decrypt: "lock.open"
+        case .connect: "terminal"
+        case .unknown: "questionmark"
+        }
+    }
+}
+
+/// Rows highlight on hover like system menu items.
+private struct RowChrome: ViewModifier {
+    var pressed = false
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(Color.primary.opacity(pressed ? 0.14 : hovering ? 0.07 : 0),
+                        in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .padding(.horizontal, 5)
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+    }
+}
+
+private struct RowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .modifier(RowChrome(pressed: configuration.isPressed))
+    }
+}
+
+// MARK: - Settings
+
+private struct SettingsMenu: View {
+    @EnvironmentObject var store: Store
+
+    var body: some View {
+        Menu {
+                Toggle("Notifications", isOn: $store.notify)
+                Toggle("Notification Sound", isOn: $store.sound).disabled(!store.notify)
+                Toggle("Launch at Login", isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
+                Divider()
+                Button("Send a Test Notification") { store.sendTest() }
+                Button("Clear History") { store.clearHistory() }.disabled(store.history.isEmpty)
+                Divider()
+                Button("Follow @guneysol on X") { open("https://x.com/guneysol") }
+                // X has no link that opens a DM by username, so this opens the profile with its Message button.
+                Button("Send Feedback on X…") { open("https://x.com/guneysol") }
+                Button("Star on GitHub") { open("https://github.com/guneysol/blinker") }
+                Button("Report a Bug…") { open("https://github.com/guneysol/blinker/issues/new/choose") }
+                Divider()
+                Button("Quit Blinker") { NSApp.terminate(nil) }.keyboardShortcut("q")
+            } label: {
+                Image(systemName: "ellipsis.circle").font(.system(size: 14))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .foregroundStyle(.secondary)
+            .help("Settings")
+            .accessibilityLabel("Settings")
+    }
+
+    private func open(_ link: String) {
+        if let url = URL(string: link) { NSWorkspace.shared.open(url) }
+    }
+}
