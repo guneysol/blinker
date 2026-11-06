@@ -39,7 +39,11 @@ main() {
 
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
-    git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$ref" "$repo" "$dir"
+    # Fetch just that tag (or branch) and check it out. `git clone --branch <signed tag>` works
+    # too, but prints a scary-looking "is not a commit" warning for signed tags.
+    git -C "$dir" init --quiet
+    git -C "$dir" fetch --quiet --depth 1 "$repo" "$ref"
+    git -C "$dir" -c advice.detachedHead=false checkout --quiet FETCH_HEAD
     # The exact code being built. Each release's notes list its commit, so you can compare.
     echo "Building commit $(git -C "$dir" rev-parse HEAD)"
     "$dir/build.sh" --install
