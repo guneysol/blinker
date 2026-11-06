@@ -9,7 +9,6 @@
 When your key waits for a touch, Blinker tells you who asked and what for, before the
 request times out.
 
-[![Build](https://github.com/guneysol/blinker/actions/workflows/build.yml/badge.svg)](https://github.com/guneysol/blinker/actions/workflows/build.yml)
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)
 ![Swift](https://img.shields.io/badge/Swift-SwiftUI-orange)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
