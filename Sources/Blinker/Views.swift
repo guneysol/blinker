@@ -99,36 +99,50 @@ private struct Waiting: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             if let likely = wait.likely {
-                HStack(alignment: .center, spacing: 10) {
-                    Circle_(symbol: "key.horizontal.fill", active: true)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(likely.title).font(.system(size: 13, weight: .semibold)).lineLimit(2)
-                        Text("\(likely.who ?? "An unrecognized program") is asking").font(.system(size: 11)).foregroundStyle(.secondary)
-                        if let where_ = [likely.place, likely.host].compactMap({ $0 }).first {
-                            Text(where_).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                        }
-                        ForEach(likely.warnings, id: \.self) { warning in
-                            Text(warning).font(.system(size: 11)).foregroundStyle(.orange).lineLimit(2)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .help("\(likely.headline)\n\(likely.command)")
-                    stop(likely, stopped: wait.stopped.contains(likely.id))
-                }
-                .padding(.horizontal, Metrics.inset)
-                .padding(.vertical, 4)
-                .accessibilityElement(children: .contain)
+                asker(likely, highlighted: true)
+            } else if !wait.looked {
+                Row(symbol: "key.horizontal.fill", active: true, title: "Checking who asked…", detail: "")
+            } else if wait.fresh.isEmpty {
+                Row(symbol: "key.horizontal.fill", active: true, title: "No program Blinker can see is asking",
+                    detail: "Don't touch your key unless you started something.", wraps: true)
             } else {
-                Row(symbol: "key.horizontal.fill", active: true,
-                    title: !wait.looked ? "Checking who asked…" : wait.fresh.isEmpty ? "Unknown program is asking" : "\(wait.fresh.count) programs asked at once",
-                    detail: !wait.looked ? "" : wait.fresh.isEmpty ? "Don't touch your key unless you started something."
-                                                                   : "Blinker can't tell which one asked.",
-                    wraps: true)
+                // Several asked at once. The touch goes to whichever one your key's agent is
+                // serving, which can't be seen from outside, so list them all as candidates.
+                Text("One of these is asking")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, Metrics.inset)
+                    .padding(.bottom, 2)
+                ForEach(wait.fresh) { asker($0, highlighted: false) }
             }
-            ForEach(wait.requests.filter { $0 != wait.likely }) { request in
-                Connected(request: request, idle: wait.idle.contains(request), stopped: wait.stopped.contains(request.id))
+            ForEach(wait.idle) { request in
+                Connected(request: request, idle: true, stopped: wait.stopped.contains(request.id))
             }
         }
+    }
+
+    /// One program that may be asking: what it wants, who it is, where it runs, and Stop.
+    private func asker(_ request: Request, highlighted: Bool) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            Circle_(symbol: highlighted ? "key.horizontal.fill" : request.symbol, active: highlighted)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(request.title).font(.system(size: 13, weight: .semibold)).lineLimit(2)
+                Text(highlighted ? "\(request.who ?? "An unrecognized program") is asking" : request.who ?? "An unrecognized program")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                if let where_ = [request.place, request.host].compactMap({ $0 }).first {
+                    Text(where_).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                }
+                ForEach(request.warnings, id: \.self) { warning in
+                    Text(warning).font(.system(size: 11)).foregroundStyle(.orange).lineLimit(2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .help("\(request.headline)\n\(request.command)")
+            stop(request, stopped: wait.stopped.contains(request.id))
+        }
+        .padding(.horizontal, Metrics.inset)
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder private func stop(_ request: Request, stopped: Bool) -> some View {
@@ -176,7 +190,7 @@ private struct Connected: View {
 
     private var detail: String {
         var parts = [request.who ?? "Unrecognized program"]
-        parts.append(idle ? "also connected since \(request.started.formatted(date: .omitted, time: .shortened))" : "also connected")
+        parts.append(idle ? "idle since \(request.started.formatted(date: .omitted, time: .shortened))" : "also connected")
         if stopped { parts.append("stopped") }
         if !request.warnings.isEmpty { parts.append("check this") }
         if store.stopFailed == request.id { parts.append("couldn't stop") }
@@ -208,16 +222,17 @@ private struct HistoryRow: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var title: String {
-        if let likely = wait.likely { return likely.title }
-        return wait.fresh.isEmpty ? "Unknown program" : "\(wait.fresh.count) programs asked at once"
-    }
+    private var title: String { wait.summary }
 
     private var detail: String {
         var parts: [String] = []
         if let likely = wait.likely {
             parts.append(likely.who ?? "Unrecognized program")
             if let repo = likely.shortPlace { parts.append(repo) }
+        } else if !wait.fresh.isEmpty {
+            var whos: [String] = []
+            for r in wait.fresh where !whos.contains(r.who ?? "A program") { whos.append(r.who ?? "A program") }
+            parts.append("one of " + whos.joined(separator: ", "))
         }
         if !wait.stopped.isEmpty { parts.append("stopped") }
         return parts.isEmpty ? "Couldn't tell who asked" : parts.joined(separator: " · ")

@@ -26,14 +26,34 @@ struct Wait: Identifiable {
     var idle: [Request] { requests.filter { began.timeIntervalSince($0.started) >= Self.freshness } }
 
     /// The single best guess: exactly one program connected just now. With none, or several,
-    /// Blinker says it can't tell rather than guess.
+    /// Blinker lists every candidate rather than guess.
     var likely: Request? { fresh.count == 1 ? fresh[0] : nil }
 
     var headline: String {
         if let likely { return likely.headline }
         if !looked { return "Checking who asked…" }
         if fresh.isEmpty { return "An unknown program is asking" }
-        return "\(fresh.count) programs asked at once"
+        return "One of \(fresh.count) programs is asking"
+    }
+
+    /// "Claude Code: Push to acme/web", once per distinct asker, for when several connected at
+    /// once. The touch goes to whichever one the agent is serving, which Blinker can't see.
+    var askers: [String] {
+        var seen: [String] = []
+        for r in fresh {
+            let line = "\(r.who ?? "A program"): \(r.title)"
+            if !seen.contains(line) { seen.append(line) }
+        }
+        return seen
+    }
+
+    /// A one-line title for history rows: "Push to acme/web or Fetch from acme/api".
+    var summary: String {
+        if let likely { return likely.title }
+        if fresh.isEmpty { return "Unknown program" }
+        var titles: [String] = []
+        for r in fresh where !titles.contains(r.title) { titles.append(r.title) }
+        return titles.joined(separator: " or ")
     }
 }
 
@@ -74,6 +94,8 @@ final class Store: NSObject, ObservableObject, UNUserNotificationCenterDelegate 
     @Published var notify: Bool { didSet { UserDefaults.standard.set(notify, forKey: "notify") } }
     @Published var sound: Bool { didSet { UserDefaults.standard.set(sound, forKey: "sound") } }
     let blink = Blink()
+    /// Set by StatusBar: opens the menu (when a notification is clicked).
+    var onOpenMenu: (() -> Void)?
     private var lastTest: String?
 
     private var watcher: TouchWatcher?
@@ -257,8 +279,8 @@ final class Store: NSObject, ObservableObject, UNUserNotificationCenterDelegate 
     func clearHistory() { history.removeAll() }
 
     /// Made-up requests for `--snapshot --demo`, so screenshots never show real projects.
-    func showDemo() {
-        current = Demo.live
+    func showDemo(several: Bool = false) {
+        current = several ? Demo.several : Demo.live
         history = Demo.history
     }
 
@@ -268,9 +290,18 @@ final class Store: NSObject, ObservableObject, UNUserNotificationCenterDelegate 
     /// any, comes first so it can't be pushed out of view by a long name. The repo, branch,
     /// server and command stay in the menu: Notification Center keeps these on disk.
     nonisolated static func notificationText(_ wait: Wait) -> (title: String, body: String) {
-        guard let likely = wait.likely else { return ("YubiKey needs a touch", wait.headline) }
-        let ask = "\(likely.who ?? "A program"): \(likely.title)"
-        guard let warning = likely.warnings.first else { return ("YubiKey needs a touch", ask) }
+        let ask: String
+        if wait.likely != nil || wait.askers.count == 1 {
+            // One asker, or the same request twice: say it once.
+            ask = wait.askers.first.map { wait.fresh.count > 1 ? "\($0) (\(wait.fresh.count) requests)" : $0 } ?? wait.headline
+        } else if wait.askers.isEmpty {
+            ask = wait.headline
+        } else {
+            // Several at once: the touch goes to one of them, so name them all, briefly.
+            let shown = wait.askers.prefix(2).joined(separator: "\nor ")
+            ask = wait.askers.count > 2 ? "\(shown)\nor \(wait.askers.count - 2) more" : shown
+        }
+        guard let warning = wait.fresh.lazy.flatMap(\.warnings).first else { return ("YubiKey needs a touch", ask) }
         return ("YubiKey needs a touch. Check first", "\(warning)\n\(ask)")
     }
 
@@ -324,6 +355,11 @@ final class Store: NSObject, ObservableObject, UNUserNotificationCenterDelegate 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
     ) async {
+        // Clicking the notification itself opens Blinker's menu, to show who's asking.
+        if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+            await MainActor.run { onOpenMenu?() }
+            return
+        }
         guard response.actionIdentifier == Self.stopAction,
               let id = response.notification.request.content.userInfo["wait"] as? String else { return }
         await MainActor.run {
@@ -347,6 +383,16 @@ enum Demo {
         Wait(began: Date().addingTimeInterval(-3), requests: [
             request("Claude Code", "push to acme/web on github.com", "git push origin feat/login",
                     "~/code/acme-web (feat/login)"),
+        ], looked: true)
+    }
+
+    /// Two programs asking at once, plus an old idle connection.
+    static var several: Wait {
+        Wait(began: Date().addingTimeInterval(-3), requests: [
+            request("Claude Code", "push to acme/web on github.com", "git push origin feat/login",
+                    "~/code/acme-web (feat/login)"),
+            request("Codex", "fetch from acme/api on github.com", "git fetch origin", "~/code/acme-api (main)", ago: 2),
+            request("Ghostty", "fetch from acme/docs on github.com", "git fetch", "~/code/acme-docs (main)", ago: 1500),
         ], looked: true)
     }
 

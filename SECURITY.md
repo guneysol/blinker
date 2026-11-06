@@ -35,8 +35,8 @@ Blinker makes this harder, but can't make it impossible:
   inside `git commit` can't borrow it, and won't let an SSH command chained after
   `git-upload-pack` pass for a fetch. It flags SSH options that change the real destination or
   forward your key.
-- It names a program only when exactly one connected just before the wait; otherwise it says it
-  can't tell. Warnings come first in the notification, so a long name can't push them out of view.
+- It names a single program only when exactly one connected just before the wait; with several,
+  it lists them all as candidates. Warnings come first in the notification, so a long name can't push them out of view.
 - It strips invisible and bidirectional characters, so text can't be made to read differently.
 
 If something already runs as you, it can do far worse than fool Blinker. Still, **don't touch

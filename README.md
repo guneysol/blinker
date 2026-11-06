@@ -83,8 +83,8 @@ the program that asked.
   "Ghostty wants to sign a commit" or "Codex wants to fetch from org/repo", with the folder and
   branch it runs in. It recognizes Claude Code, Codex, Gemini CLI, Cursor, Aider, opencode and
   more, plus the terminal or editor you started it from.
-- **Flags anything odd.** Blinker warns, or says it can't tell, instead of guessing:
-  - Several programs asked at once, or nothing it recognizes did.
+- **Flags anything odd.** Blinker warns, or lists every candidate, instead of guessing:
+  - Several programs asked at once (it names them all), or nothing it can see did.
   - The program runs from an unusual place, like `/tmp`, or its name doesn't match its file.
   - The SSH connection goes somewhere other than the host shown, or forwards your key.
 - **Lets you stop it.** The notification and the menu have a **Stop** button that cancels the
@@ -158,11 +158,12 @@ Check your current policies with `ykman openpgp info`.
 </details>
 
 <details>
-<summary><b>It said "2 programs asked at once" or "An unknown program is asking".</b></summary>
+<summary><b>It listed two programs, "one of these is asking".</b></summary>
 
-Blinker names a program only when exactly one connected to your key's agent just before the key
-started waiting. With two at once, or none it can see, it says so instead of guessing; open the
-menu to see everything connected. A connection older than a minute is listed as idle (often a
+Two programs asked your key's agent at the same moment, for example two pushes. Your touch goes to
+whichever one the agent is serving first, and that can't be seen from outside, so Blinker names
+both instead of guessing. Click the notification to open the menu, where each has a Stop button.
+If it says no program it can see is asking, don't touch unless you started something. A connection older than a minute is listed as idle (often a
 stuck `git fetch`), and you can stop it there.
 </details>
 
@@ -178,8 +179,7 @@ you.
 <summary><b>What about FIDO2 / security-key SSH keys?</b></summary>
 
 Those talk to the key over a different USB channel and don't produce the log lines Blinker
-watches. Support is planned. Until then, tools listed under [Alternatives](#alternatives) can
-detect FIDO2 waits, without the "who asked" part.
+watches. Support is planned.
 </details>
 
 <details>
@@ -188,19 +188,6 @@ detect FIDO2 waits, without the "who asked" part.
 A downloaded app has to be notarized by Apple, or Gatekeeper blocks it. Building from source
 avoids that, and the whole app is about 1,900 lines of Swift, easy to read before you run it.
 </details>
-
-## Alternatives
-
-Other people have built great tools for noticing the blink:
-
-- [**yubikey-touch-detector**](https://github.com/maximbaz/yubikey-touch-detector): the original,
-  for Linux, now with a macOS backend. It covers GPG, SSH and FIDO2.
-- [**macos-yubikey-touch-notifier**](https://github.com/tamtamchik/macos-yubikey-touch-notifier):
-  a signed native app with FIDO2 support.
-- [**yknotify**](https://github.com/noperator/yknotify): a small Go daemon that pioneered reading
-  the macOS log.
-
-Blinker is the one that tells you **who** asked and **why**, and lets you stop it.
 
 ## Update and uninstall
 

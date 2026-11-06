@@ -63,15 +63,15 @@ enum Snapshot {
         app.setActivationPolicy(.prohibited)
         Task { @MainActor in
             await write(to: args[1], dark: args.contains("--dark"), demo: args.contains("--demo"),
-                        scene: args.contains("--scene"))
+                        several: args.contains("--several"), scene: args.contains("--scene"))
             exit(0)
         }
         app.run()
     }
 
-    private static func write(to path: String, dark: Bool, demo: Bool, scene: Bool) async {
+    private static func write(to path: String, dark: Bool, demo: Bool, several: Bool, scene: Bool) async {
         let store = Store()
-        if demo { store.showDemo() }
+        if demo { store.showDemo(several: several) }
         let root = scene
             ? AnyView(DemoScene(dark: dark).environmentObject(store))
             : AnyView(MenuView().environmentObject(store).background(.windowBackground))
@@ -103,7 +103,8 @@ enum CLI {
           --watch     print touch waits as they happen, with who asked (Ctrl-C to quit)
           --snapshot  render the menu to a PNG. It shows an empty menu (this is a new process,
                       not the running app) unless you add --demo for made-up data. --dark for
-                      dark mode, --scene for the README image (desktop, menu and notification)
+                      dark mode, --scene for the README image (desktop, menu and notification),
+                      --several for two programs asking at once
         """)
     }
 

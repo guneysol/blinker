@@ -156,7 +156,18 @@ private func proc(_ exe: String, _ argv: [String], name: String? = nil, started:
         let now = Date()
         let wait = Wait(began: now, requests: [Request.demo.with(started: now), Request.demo.with(started: now)], looked: true)
         #expect(wait.likely == nil)
-        #expect(wait.headline == "2 programs asked at once")
+        #expect(wait.headline == "One of 2 programs is asking")
+        // The same request twice is said once.
+        #expect(Store.notificationText(wait).body == "Claude Code: Push to guneysol/blinker (2 requests)")
+    }
+
+    @Test func differentAskersAreAllNamed() {
+        let now = Date()
+        let fetch = Request(pid: 2, started: now, exe: "/usr/bin/ssh", knownLocation: true, who: "Codex",
+                            action: "fetch from acme/api on github.com", command: "ssh", place: nil, host: "github.com")
+        let wait = Wait(began: now, requests: [Request.demo.with(started: now), fetch], looked: true)
+        #expect(Store.notificationText(wait).body == "Claude Code: Push to guneysol/blinker\nor Codex: Fetch from acme/api")
+        #expect(wait.summary == "Push to guneysol/blinker or Fetch from acme/api")
     }
 
     @Test func noClientIsUnknown() {

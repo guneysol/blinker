@@ -24,6 +24,10 @@ final class StatusBar: NSObject, NSWindowDelegate {
         item.button?.target = self
         item.button?.action = #selector(toggle)
         item.button?.setAccessibilityLabel("Blinker")
+        store.onOpenMenu = { [weak self] in
+            guard let self, self.panel?.isVisible != true else { return }
+            self.open()
+        }
         // Only the icon's inputs; nothing else in Store touches the status button.
         watching = store.$current.map { $0 != nil }
             .combineLatest(store.blink.$on, store.$problem.map { $0 != nil })
