@@ -1,7 +1,7 @@
 # Contributing
 
 Thanks for helping! Blinker is small on purpose: plain SwiftUI with Swift Package Manager, no
-dependencies, and about 1,900 lines.
+dependencies, and about 2,200 lines.
 
 ## Development loop
 
