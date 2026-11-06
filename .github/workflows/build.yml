@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch: # run it by hand from the Actions tab
 
 # Read-only token: CI never needs to write to the repo.
 permissions:
