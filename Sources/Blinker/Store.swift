@@ -49,10 +49,10 @@ struct Wait: Identifiable {
 
     /// A one-line title for history rows: "Push to acme/web or Fetch from acme/api".
     var summary: String {
-        if let likely { return likely.title }
+        if let likely { return likely.compactTitle }
         if fresh.isEmpty { return "Unknown program" }
         var titles: [String] = []
-        for r in fresh where !titles.contains(r.title) { titles.append(r.title) }
+        for r in fresh where !titles.contains(r.compactTitle) { titles.append(r.compactTitle) }
         return titles.joined(separator: " or ")
     }
 }
@@ -192,6 +192,13 @@ final class Store: NSObject, ObservableObject, UNUserNotificationCenterDelegate 
                 let requests = Requests.current()
                 await MainActor.run { self.found(requests, for: wait.id) }
             }
+            // If finding the asker takes unusually long, still tell the user the key is waiting.
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(2))
+                guard let self, let current = self.current, current.id == wait.id, !current.looked, self.notify else { return }
+                log.info("asker lookup is slow; notifying without it")
+                self.post(current)
+            }
         case .ended:
             guard var wait = current else { return }
             wait.ended = Date()
@@ -229,7 +236,7 @@ final class Store: NSObject, ObservableObject, UNUserNotificationCenterDelegate 
     private func keepLooking(_ id: UUID) {
         Task { [weak self] in
             while true {
-                try? await Task.sleep(for: .seconds(3))
+                try? await Task.sleep(for: .seconds(1.5))
                 guard let self, self.current?.id == id else { return }
                 let requests = await Task.detached(priority: .utility) { Requests.current() }.value
                 self.update(requests, for: id)
@@ -244,13 +251,14 @@ final class Store: NSObject, ObservableObject, UNUserNotificationCenterDelegate 
         let known = Dictionary(wait.requests.map { (key($0), $0) }, uniquingKeysWith: { a, _ in a })
         let merged = fresh.map { known[key($0)] ?? $0 }
         guard merged.map(key) != wait.requests.map(key) else { return }
-        let before = wait.likely.map(key)
+        let freshBefore = Set(wait.fresh.map(key))
         wait.requests = merged
         current = wait
         log.info("connected programs changed: now \(merged.count, privacy: .public)")
-        // A new, identifiable asker replaces the banner (same identifier). One that just left
-        // doesn't: the menu shows the change without another sound.
-        if notify, let now = wait.likely.map(key), now != before { post(wait) }
+        // Something new asked during this wait (it may be what your next touch approves), so
+        // replace the banner, with its sound. Programs that just left change only the menu.
+        let joined = !Set(wait.fresh.map(key)).subtracting(freshBefore).isEmpty
+        if notify, joined { post(wait) }
     }
 
     // MARK: - Stopping a request
@@ -312,6 +320,11 @@ final class Store: NSObject, ObservableObject, UNUserNotificationCenterDelegate 
         content.body = text.body
         if wait.likely != nil { content.categoryIdentifier = Self.category }
         content.userInfo = ["wait": wait.id.uuidString]
+        if let likely = wait.likely {
+            // Stop acts on exactly this program, even if the banner is replaced in between.
+            content.userInfo["pid"] = Int(likely.pid)
+            content.userInfo["started"] = likely.started.timeIntervalSince1970
+        }
         if sound { content.sound = .default }
         // .timeSensitive would break through Focus, but it needs an Apple-issued entitlement that
         // a locally built app can't have, so this is the strongest level available.
@@ -365,7 +378,10 @@ final class Store: NSObject, ObservableObject, UNUserNotificationCenterDelegate 
         await MainActor.run {
             // Only the wait that is still going, and only the single program it named. A banner
             // clicked after the touch, or after a new wait began, does nothing.
-            guard let wait = current, wait.id.uuidString == id, let likely = wait.likely else { return }
+            guard let wait = current, wait.id.uuidString == id, let likely = wait.likely,
+                  response.notification.request.content.userInfo["pid"] as? Int == Int(likely.pid),
+                  response.notification.request.content.userInfo["started"] as? Double == likely.started.timeIntervalSince1970
+            else { return }
             stop(likely)
         }
     }
@@ -381,7 +397,7 @@ enum Demo {
 
     static var live: Wait {
         Wait(began: Date().addingTimeInterval(-3), requests: [
-            request("Claude Code", "push to acme/web on github.com", "git push origin feat/login",
+            request("Claude Code", "fetch from acme/web on github.com", "git fetch origin",
                     "~/code/acme-web (feat/login)"),
         ], looked: true)
     }
@@ -389,7 +405,7 @@ enum Demo {
     /// Two programs asking at once, plus an old idle connection.
     static var several: Wait {
         Wait(began: Date().addingTimeInterval(-3), requests: [
-            request("Claude Code", "push to acme/web on github.com", "git push origin feat/login",
+            request("Claude Code", "fetch from acme/web on github.com", "git fetch origin",
                     "~/code/acme-web (feat/login)"),
             request("Codex", "fetch from acme/api on github.com", "git fetch origin", "~/code/acme-api (main)", ago: 2),
             request("Ghostty", "fetch from acme/docs on github.com", "git fetch", "~/code/acme-docs (main)", ago: 1500),

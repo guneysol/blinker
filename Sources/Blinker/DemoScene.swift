@@ -6,10 +6,13 @@ import SwiftUI
 struct DemoScene: View {
     @EnvironmentObject var store: Store
     let dark: Bool
+    /// The README image is wide and short; the tweet image is 16:9 and tighter, so the UI stays
+    /// readable on a phone.
+    var tweet = false
 
-    static let size = CGSize(width: 1200, height: 320)
+    private var size: CGSize { tweet ? CGSize(width: 800, height: 450) : CGSize(width: 1200, height: 320) }
     /// Where Blinker's icon sits in the menu bar; the menu opens centered under it.
-    private let iconX: CGFloat = 640
+    private var iconX: CGFloat { tweet ? 290 : 640 }
     private let menuBarHeight: CGFloat = 30
 
     var body: some View {
@@ -26,10 +29,10 @@ struct DemoScene: View {
             if let wait = store.current {
                 Banner(text: Store.notificationText(wait))
                     .frame(width: 344)
-                    .offset(x: Self.size.width - 344 - 12, y: menuBarHeight + 8)
+                    .offset(x: size.width - 344 - 12, y: menuBarHeight + 8)
             }
         }
-        .frame(width: Self.size.width, height: Self.size.height, alignment: .topLeading)
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
         .clipped()
         .environment(\.colorScheme, dark ? .dark : .light)
     }
@@ -46,7 +49,9 @@ struct DemoScene: View {
         return HStack(spacing: 0) {
             Image(systemName: "apple.logo").font(.system(size: 15)).frame(width: 40)
             Text("Finder").fontWeight(.bold).padding(.trailing, 18)
-            ForEach(["File", "Edit", "View", "Go", "Window", "Help"], id: \.self) { Text($0).padding(.trailing, 18) }
+            ForEach(tweet ? ["File", "Edit"] : ["File", "Edit", "View", "Go", "Window", "Help"], id: \.self) {
+                Text($0).padding(.trailing, 18)
+            }
             Spacer()
             // Blinker, open and blinking green.
             Image(systemName: "key.horizontal.fill")
@@ -62,12 +67,12 @@ struct DemoScene: View {
                 }
                 Text("Thu Nov 5  9:41 AM").frame(width: 150, alignment: .trailing)
             }
-            .frame(width: Self.size.width - iconX - 20 - 12, alignment: .trailing)
+            .frame(width: size.width - iconX - 20 - 12, alignment: .trailing)
             .padding(.trailing, 12)
         }
         .font(.system(size: 13, weight: .medium))
         .foregroundStyle(ink)
-        .frame(width: Self.size.width, height: menuBarHeight)
+        .frame(width: size.width, height: menuBarHeight)
         .background(dark ? Color.black.opacity(0.25) : Color.white.opacity(0.35))
     }
 

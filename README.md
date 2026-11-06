@@ -16,7 +16,7 @@ request times out.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/demo-dark.png">
-  <img src="docs/demo-light.png" width="900" alt="Blinker's green key icon in the menu bar, its menu showing Claude Code wants to push to acme/web on github.com with a Stop button, and the notification it posts">
+  <img src="docs/demo-light.png" width="900" alt="Blinker's green key icon in the menu bar, its menu showing Claude Code wants to fetch from acme/web on github.com with a Stop button, and the notification it posts">
 </picture>
 
 </div>
@@ -38,7 +38,9 @@ notifications when macOS asks, then turn on **Launch at Login** from the `⋯` m
 3. It builds Blinker and copies it to `/Applications`, or to `~/Applications` if your account
    can't write to `/Applications` without sudo.
 
-It needs no sudo and touches nothing else. [Read the script](install.sh).
+It needs no sudo and touches nothing else, and it prints the exact commit it builds.
+[Read the script](install.sh). The one-line install trusts this GitHub account; the
+build-it-yourself steps below also check the release's signature.
 
 <details>
 <summary><b>Prefer to look first?</b></summary>
@@ -54,19 +56,22 @@ bash install.sh
 Or skip the script and build it yourself:
 
 ```bash
+curl -fsSL https://github.com/guneysol.gpg | gpg --import   # the maintainer's signing key
 git clone https://github.com/guneysol/blinker && cd blinker
-tag=$(git describe --tags --abbrev=0) && git checkout -q "$tag"   # the latest release
-git tag -v "$tag"   # optional: check that release's signature
-./build.sh --install
+tag=$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+git tag -v "$tag" && git checkout -q "$tag" && ./build.sh --install
 ```
 </details>
 
 **Requires** macOS 14 or later, Apple's developer tools, and an **admin account**. macOS only
 lets admin accounts read the system log, which Blinker watches.
 
+> **Blinker tells you *that* your key is waiting. *Who* asked is a best guess, which any program
+> on your Mac could fake. Only touch your key for something you just started.**
+
 ## Why
 
-Your key signs commits and authenticates `git push`, but it has no screen. It blinks, and the
+Your key signs commits and authenticates `git fetch` and `git push`, but it has no screen. It blinks, and the
 request times out after about 15 seconds if you don't notice. Then whatever asked fails or hangs.
 With AI agents running git in the background, you often don't know a request is waiting. When
 you do notice, you don't know what you'd be approving.
@@ -79,7 +84,7 @@ the program that asked.
 
 - **Notices the wait.** You get a notification within about half a second of the key starting
   to blink, and the menu bar key blinks green. Both go away when you touch the key.
-- **Says who asked and why.** For example "Claude Code wants to push to org/repo on github.com",
+- **Says who asked and why.** For example "Claude Code wants to fetch from org/repo on github.com",
   "Ghostty wants to sign a commit" or "Codex wants to fetch from org/repo", with the folder and
   branch it runs in. It recognizes Claude Code, Codex, Gemini CLI, Cursor, Aider, opencode and
   more, plus the terminal or editor you started it from.
@@ -131,12 +136,14 @@ What Blinker does and doesn't do:
 - It makes **no network connections** and sends nothing anywhere.
 - It runs as you. It never asks for sudo, and it can only stop your own processes.
 - It saves two settings: notifications and sound. Request history stays in memory until you quit.
-- Notifications show only who asked and what for ("Claude Code: Push to acme/web"), never the
+- Notifications show only who asked and what for ("Claude Code: Fetch from acme/web on github.com"), never the
   command, because macOS keeps delivered notifications on disk. Commands shown in the menu have
   tokens and passwords removed, as far as the app can tell.
-- It reads other programs' arguments, never their environment variables, and never looks inside
-  Desktop, Documents, Downloads, iCloud Drive or network drives, so it doesn't trigger privacy
-  prompts.
+- To tell who asked, it reads the arguments and folders of your own running programs (never their
+  environment variables) and the current branch from `.git/HEAD`. It never looks inside Desktop,
+  Documents, Downloads, iCloud Drive or network drives, so it doesn't trigger privacy prompts.
+- Notifications name the program and repo (they're removed once you touch the key). The links in
+  the `⋯` menu (X, GitHub) open in your browser.
 - It's built from source on your Mac, with an ad-hoc signature and the hardened runtime. It isn't
   notarized by Apple.
 
@@ -160,7 +167,7 @@ Check your current policies with `ykman openpgp info`.
 <details>
 <summary><b>It listed two programs, "one of these is asking".</b></summary>
 
-Two programs asked your key's agent at the same moment, for example two pushes. Your touch goes to
+Two programs asked your key's agent at the same moment, for example two fetches. Your touch goes to
 whichever one the agent is serving first, and that can't be seen from outside, so Blinker names
 both instead of guessing. Click the notification to open the menu, where each has a Stop button.
 If it says no program it can see is asking, don't touch unless you started something. A connection older than a minute is listed as idle (often a

@@ -73,7 +73,7 @@ enum Snapshot {
         let store = Store()
         if demo { store.showDemo(several: several) }
         let root = scene
-            ? AnyView(DemoScene(dark: dark).environmentObject(store))
+            ? AnyView(DemoScene(dark: dark, tweet: CommandLine.arguments.contains("--tweet")).environmentObject(store))
             : AnyView(MenuView().environmentObject(store).background(.windowBackground))
         let host = NSHostingView(rootView: root)
         host.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
@@ -104,7 +104,7 @@ enum CLI {
           --snapshot  render the menu to a PNG. It shows an empty menu (this is a new process,
                       not the running app) unless you add --demo for made-up data. --dark for
                       dark mode, --scene for the README image (desktop, menu and notification),
-                      --several for two programs asking at once
+                      --several for two programs asking at once, --tweet for a 16:9 scene
         """)
     }
 

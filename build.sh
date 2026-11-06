@@ -6,6 +6,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+if [[ $EUID -eq 0 && "${1:-}" == --install ]]; then
+    echo "Please run this without sudo. Blinker installs and runs as your own user."
+    exit 1
+fi
+
 swift build -c release
 
 APP=build/Blinker.app
@@ -41,14 +46,21 @@ relaunch() {
     # Stop the running Blinker, like portside: no AppleScript, so no "wants to control" prompt.
     # Only your own processes, and only the app itself (its exact path with no arguments), so
     # an editor or a `Blinker --watch` session is never touched. Blinker exits cleanly on TERM.
-    local pid
+    local pid exe
     for pid in $(pgrep -U "$(id -u)" -x Blinker); do
-        case "$(ps -o args= -p "$pid")" in
+        exe=$(ps -o args= -p "$pid")
+        case "$exe" in
             "/Applications/Blinker.app/Contents/MacOS/Blinker" | \
             "$HOME/Applications/Blinker.app/Contents/MacOS/Blinker" | \
             "$PWD/build/Blinker.app/Contents/MacOS/Blinker")
+                # Only if that app really is Blinker, not another app installed under the same name.
+                [[ "$(defaults read "${exe%/Contents/MacOS/Blinker}/Contents/Info" CFBundleIdentifier 2>/dev/null)" \
+                    == io.github.guneysol.blinker ]] || continue
                 kill "$pid" 2>/dev/null || true
-                while kill -0 "$pid" 2>/dev/null; do sleep 0.1; done ;;
+                # Give it up to 10 s to quit cleanly; a stuck one is force-quit so this can't hang.
+                local waited=0
+                while kill -0 "$pid" 2>/dev/null && (( waited < 100 )); do sleep 0.1; waited=$((waited + 1)); done
+                kill -9 "$pid" 2>/dev/null || true ;;
         esac
     done
     open "$1"

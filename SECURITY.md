@@ -30,7 +30,12 @@ Blinker makes this harder, but can't make it impossible:
 
 - It identifies tools by executable path, not by the name a process gives itself, and lists every
   program connected to your key's agent, whatever it calls itself.
-- It flags executables in unusual locations, and names that don't match the file.
+- It flags executables in unusual locations, names that don't match the file, and any program in
+  the chain that started the request from a temporary or download folder.
+- It always shows the server an SSH request goes to, reads `-o` options the way ssh itself does,
+  and warns when options send the connection elsewhere or forward your key.
+- If a new program asks during a wait (your next touch may go to it), the notification is replaced
+  and plays its sound again.
 - It uses git's label ("sign a commit") only for the exact signing command git runs, so a hook
   inside `git commit` can't borrow it, and won't let an SSH command chained after
   `git-upload-pack` pass for a fetch. It flags SSH options that change the real destination or

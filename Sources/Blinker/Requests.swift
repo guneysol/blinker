@@ -23,14 +23,19 @@ struct Request: Identifiable, Equatable {
     let place: String?
     /// The server it talks to over SSH, as shown: "github.com".
     var host: String? = nil
+    /// A program that started the asker from a temporary or download folder, if any.
+    var launcher: String? = nil
 
     var headline: String { "\(who ?? "A program") wants to \(action)" }
 
-    /// The action without its server, for compact rows: "Push to guneysol/portside".
-    var title: String {
-        var short = action
-        if let host, short.hasSuffix(" on \(host)") { short.removeLast(host.count + 4) }
-        return short.prefix(1).uppercased() + short.dropFirst()
+    /// "Fetch from guneysol/portside on github.com". The server always stays in: a repo name is
+    /// easy to fake, and where the connection goes is what matters.
+    var title: String { action.prefix(1).uppercased() + action.dropFirst() }
+
+    /// The title without the server, for history rows, unless the server carries a warning.
+    var compactTitle: String {
+        guard let host, !host.hasSuffix(")"), title.hasSuffix(" on \(host)") else { return title }
+        return String(title.dropLast(host.count + 4))
     }
 
     static func == (a: Request, b: Request) -> Bool { a.id == b.id }
@@ -91,6 +96,9 @@ enum Requests {
             git = (parent, sub)
         }
         let shown = git?.proc ?? requester
+        // A real agent or terminal never runs from a temporary or download folder. Anything in
+        // the chain that does (a fake "claude" in /tmp starting a real ssh) gets flagged.
+        let launcher = chain.dropFirst().first { Tool.isTemporaryLocation($0.exe) }
 
         return Request(
             pid: requester.pid,
@@ -106,7 +114,8 @@ enum Requests {
                 ?? "use your key (\(Sanitize.clean(requester.exe.basename, limit: 40)))",
             command: Sanitize.clean(Sanitize.redact(shown.argv).joined(separator: " "), limit: 120),
             place: Place.describe(cwd: shown.cwd.isEmpty ? requester.cwd : shown.cwd),
-            host: tool.kind == .ssh ? SSH.parse(requester.argv)?.displayHost : nil
+            host: tool.kind == .ssh ? SSH.parse(requester.argv)?.displayHost : nil,
+            launcher: launcher.map { Sanitize.clean($0.exe, limit: 120, keepEnd: true) }
         )
     }
 
@@ -213,6 +222,15 @@ struct Tool {
     }
 
     /// Whether this is the program git runs for `sub`: ssh for remotes, gpg or ssh-keygen for signing.
+    /// Temporary and download folders: where something dropped by a script or a browser lives.
+    static func isTemporaryLocation(_ exe: String) -> Bool {
+        let home = NSHomeDirectory()
+        let prefixes = ["/tmp/", "/private/tmp/", "/var/tmp/", "/private/var/tmp/", "/var/folders/",
+                        "/private/var/folders/", home + "/Downloads/", home + "/.Trash/"]
+        let path = exe.lowercased()
+        return prefixes.contains { path.hasPrefix($0.lowercased()) }
+    }
+
     /// Whether this is exactly the helper git runs for `sub`: ssh for remotes, and for signing
     /// `gpg --status-fd=2 -bsau <key>` or `ssh-keygen -Y sign -n git`. A hook that runs, say,
     /// `gpg -d secrets.gpg` inside `git commit` doesn't match, so it can't pass as "sign a commit".
@@ -279,7 +297,22 @@ enum SSH {
     /// ssh options that take a value, from ssh(1).
     private static let valued = Set("BbcDEeFIiJLlmOoPpQRSWw")
     /// `-o` options that make the real destination differ from the one on the command line.
-    private static let rerouting = ["hostname", "proxycommand", "proxyjump", "localcommand", "remotecommand"]
+    private static let rerouting: Set<String> = [
+        "hostname", "proxycommand", "proxyjump", "localcommand", "remotecommand", "include",
+        "canonicaldomains", "canonicalizehostname", "hostkeyalias", "knownhostscommand",
+    ]
+
+    /// Splits an `-o` value the way ssh's own config reader does: leading spaces and tabs are
+    /// skipped, the keyword ends at the first space, tab or "=", and keywords ignore case. So
+    /// "\tHostName evil" and "ForwardAgent\tyes" are recognized like their plain spellings.
+    static func option(_ raw: String) -> (key: String, value: String) {
+        let blank: (Character) -> Bool = { $0 == " " || $0 == "\t" }
+        let trimmed = raw.drop(while: blank)
+        let key = trimmed.prefix { !blank($0) && $0 != "=" }
+        var rest = trimmed.dropFirst(key.count).drop(while: blank)
+        if rest.first == "=" { rest = rest.dropFirst().drop(while: blank) }
+        return (key.lowercased(), String(rest).lowercased())
+    }
 
     struct Call {
         let host: String
@@ -304,10 +337,17 @@ enum SSH {
                 let after = flags.index(after: at)
                 let attached = after == flags.endIndex ? nil : String(flags[after...])
                 let value = attached ?? (i + 1 < argv.count ? argv[i + 1] : "")
-                if flags[at] == "J" || flags[at] == "F" { rerouted = true }
-                if flags[at] == "o", rerouting.contains(where: value.lowercased().hasPrefix) { rerouted = true }
-                if flags[at] == "o", value.lowercased().replacingOccurrences(of: " ", with: "")
-                    .hasPrefix("forwardagent=") || value.lowercased().hasPrefix("forwardagent ") { forwards = true }
+                switch flags[at] {
+                case "J", "F": rerouted = true
+                case "R" where value.contains("/"), "L" where value.contains("/"):
+                    forwards = true // a forwarded socket can carry your key
+                case "o":
+                    let o = option(value)
+                    if rerouting.contains(o.key) { rerouted = true }
+                    if o.key == "forwardagent", o.value != "no" { forwards = true }
+                    if ["remoteforward", "localforward"].contains(o.key), o.value.contains("/") { forwards = true }
+                default: break
+                }
                 i += attached == nil ? 2 : 1
             } else {
                 i += 1
@@ -336,9 +376,12 @@ extension SSH.Call {
     var action: String {
         let host = displayHost
         let joined = remoteCommand.joined(separator: " ")
-        let words = joined.split(separator: " ").map(String.init)
+        let words = joined.split(whereSeparator: \.isWhitespace).map(String.init)
         guard let verb = words.first else { return "connect to \(host)" }
-        let plain = words.count <= 2 && !joined.contains(where: { ";|&$`<>(){}\\".contains($0) })
+        // Plain ASCII only: a no-break space or look-alike could otherwise smuggle extra words
+        // ("acme/web on github.com") into what looks like the repo name.
+        let plain = words.count <= 2 && joined.unicodeScalars.allSatisfy { $0.isASCII && $0.value >= 0x20 }
+            && !joined.contains(where: { ";|&$`<>(){}\\".contains($0) })
         let repo = words.dropFirst().first.map { Sanitize.clean(Self.repoName($0), limit: 60) }
         let target = repo.map { "\($0) on \(host)" } ?? host
         switch (plain, verb) {
@@ -389,15 +432,37 @@ enum Place {
 
     /// Folders macOS guards with a privacy prompt. Looking inside would make Blinker ask for
     /// access it doesn't need, so it shows the path without reading anything there.
-    private static let protected = ["Desktop", "Documents", "Downloads", "Library/Mobile Documents", "Library/CloudStorage"]
-        .map { NSHomeDirectory() + "/" + $0 }
+    private static let protected = [
+        "Desktop", "Documents", "Downloads", "Library/Mobile Documents", "Library/CloudStorage",
+        "Library/Containers", "Library/Group Containers", "Library/Mail", "Library/Messages",
+    ].map { (NSHomeDirectory() + "/" + $0).lowercased() }
 
-    /// Local disks only: a network share can hang, and reading it would cause network traffic.
+    /// Local disks only (a network share can hang, and reading it causes network traffic), and
+    /// never a folder macOS guards with a privacy prompt. Decided without touching the path:
+    /// the mount table comes from the kernel's cached copy (MNT_NOWAIT), so a dead mount
+    /// can't block here.
     static func canRead(_ path: String) -> Bool {
-        if protected.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) { return false }
-        if ["/Volumes/", "/net/", "/Network/"].contains(where: path.hasPrefix) { return false }
-        var fs = statfs()
-        return statfs(path, &fs) == 0 && (fs.f_flags & UInt32(MNT_LOCAL)) != 0
+        // The file system is case-insensitive, and /System/Volumes/Data is another name for /.
+        var p = path.lowercased()
+        if p.hasPrefix("/system/volumes/data/") { p = String(p.dropFirst("/system/volumes/data".count)) }
+        if protected.contains(where: { p == $0 || p.hasPrefix($0 + "/") }) { return false }
+        if ["/volumes/", "/net/", "/network/"].contains(where: p.hasPrefix) { return false }
+        return isOnLocalMount(path)
+    }
+
+    private static func isOnLocalMount(_ path: String) -> Bool {
+        var mounts: UnsafeMutablePointer<statfs>?
+        let count = Int(getmntinfo(&mounts, MNT_NOWAIT))
+        guard count > 0, let mounts else { return false }
+        var best: (length: Int, local: Bool) = (-1, false)
+        for i in 0..<count {
+            var m = mounts[i]
+            let point = withUnsafeBytes(of: &m.f_mntonname) { Processes.cString($0) }
+            let prefix = point == "/" ? "/" : point + "/"
+            guard path == point || path.hasPrefix(prefix), point.count > best.length else { continue }
+            best = (point.count, (m.f_flags & UInt32(MNT_LOCAL)) != 0)
+        }
+        return best.local
     }
 
     /// The checkout root and current branch. Reads at most two small files, no `git` process.
@@ -484,7 +549,7 @@ enum Sanitize {
         return String(view)
     }
 
-    private static let secretWords = ["pass", "token", "secret", "auth", "key", "cookie", "bearer", "credential", "session"]
+    private static let secretWords = ["pass", "token", "secret", "auth", "key", "cookie", "bearer", "credential", "session", "header"]
     /// Flags whose next argument is often a credential.
     private static let secretFlags: Set<String> = ["-H", "--header", "-u", "--user", "-p", "-P", "--password"]
     private static let tokenPrefixes = ["ghp_", "gho_", "ghu_", "ghs_", "github_pat_", "glpat-", "sk-", "xox", "AKIA", "eyJ", "ya29."]
@@ -499,11 +564,17 @@ enum Sanitize {
             if hideNext { out.append("•••"); hideNext = false; continue }
             let isFlag = arg.hasPrefix("-")
             let name = arg.firstIndex(of: "=").map { String(arg[..<$0]) } ?? arg
+            // First, anything that carries its value inside this same argument.
+            // Values attached to short flags: mysql -pS3cret, curl -HAuthorization:…, -uuser:pass
+            if isFlag, !arg.hasPrefix("--"), arg.count > 2, let flag = ["-p", "-P", "-H", "-u"].first(where: arg.hasPrefix) {
+                out.append(flag + "•••"); continue
+            }
+            // An Authorization header anywhere, e.g. -c "http.extraHeader=Authorization: Basic …"
+            if arg.lowercased().contains("authorization") { out.append("•••"); continue }
             if isFlag, secretFlags.contains(name) || secretWords.contains(where: name.lowercased().contains) {
                 if name != arg { out.append(name + "=•••") } else { out.append(arg); hideNext = true }
                 continue
             }
-            if isFlag, !arg.hasPrefix("--"), arg.count > 2, arg.hasPrefix("-p") { out.append("-p•••"); continue } // mysql -pS3cret
             if name != arg, secretWords.contains(where: name.lowercased().contains) { out.append(name + "=•••"); continue }
             out.append(redactTokens(redactURL(arg)))
         }
@@ -541,6 +612,7 @@ extension Request {
         var out: [String] = []
         if !knownLocation { out.append("Unusual program: \(exe)") }
         if let host, host.hasSuffix(")") { out.append("Server: \(host)") }
+        if let launcher { out.append("Started from a temporary folder: \(launcher)") }
         return out
     }
 

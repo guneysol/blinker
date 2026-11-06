@@ -136,8 +136,8 @@ private func proc(_ exe: String, _ argv: [String], name: String? = nil, started:
 }
 
 @Suite struct Titles {
-    @Test func titleDropsTheHost() {
-        #expect(Request.demo.title == "Push to guneysol/blinker")
+    @Test func titleKeepsTheServer() {
+        #expect(Request.demo.title == "Push to guneysol/blinker on github.com")
         #expect(Request.demo.headline == "Claude Code wants to push to guneysol/blinker on github.com")
     }
 }
@@ -158,7 +158,7 @@ private func proc(_ exe: String, _ argv: [String], name: String? = nil, started:
         #expect(wait.likely == nil)
         #expect(wait.headline == "One of 2 programs is asking")
         // The same request twice is said once.
-        #expect(Store.notificationText(wait).body == "Claude Code: Push to guneysol/blinker (2 requests)")
+        #expect(Store.notificationText(wait).body == "Claude Code: Push to guneysol/blinker on github.com (2 requests)")
     }
 
     @Test func differentAskersAreAllNamed() {
@@ -166,7 +166,7 @@ private func proc(_ exe: String, _ argv: [String], name: String? = nil, started:
         let fetch = Request(pid: 2, started: now, exe: "/usr/bin/ssh", knownLocation: true, who: "Codex",
                             action: "fetch from acme/api on github.com", command: "ssh", place: nil, host: "github.com")
         let wait = Wait(began: now, requests: [Request.demo.with(started: now), fetch], looked: true)
-        #expect(Store.notificationText(wait).body == "Claude Code: Push to guneysol/blinker\nor Codex: Fetch from acme/api")
+        #expect(Store.notificationText(wait).body == "Claude Code: Push to guneysol/blinker on github.com\nor Codex: Fetch from acme/api on github.com")
         #expect(wait.summary == "Push to guneysol/blinker or Fetch from acme/api")
     }
 
@@ -188,7 +188,7 @@ private func proc(_ exe: String, _ argv: [String], name: String? = nil, started:
         let text = Store.notificationText(Wait(began: now, requests: [odd], looked: true))
         #expect(text.body.hasPrefix("Unusual program: /tmp/ssh"))
         #expect(Store.notificationText(Wait(began: now, requests: [Request.demo.with(started: now)], looked: true)).body
-                == "Claude Code: Push to guneysol/blinker")
+                == "Claude Code: Push to guneysol/blinker on github.com")
     }
 
     @Test func timeExtensionLinesAreRevalidated() {
@@ -213,4 +213,46 @@ extension Request {
         action: "push to guneysol/blinker on github.com", command: "git push origin feat/notify",
         place: "~/code/blinker (feat/notify)", host: "github.com"
     )
+}
+
+/// Regressions for the second security audit.
+@Suite struct AuditFixes {
+    @Test func sshOptionsAreReadLikeSshReadsThem() {
+        // Tab separators and leading whitespace, which ssh accepts.
+        #expect(SSH.parse(["ssh", "-o", "\tHostName evil.example", "github.com"])?.rerouted == true)
+        #expect(SSH.parse(["ssh", "-o", "ForwardAgent\tyes", "github.com"])?.forwardsAgent == true)
+        #expect(SSH.parse(["ssh", "-oFORWARDAGENT = yes", "github.com"])?.forwardsAgent == true)
+        #expect(SSH.parse(["ssh", "-o", "ForwardAgent=no", "github.com"])?.forwardsAgent == false)
+        // Socket forwards can carry the agent.
+        #expect(SSH.parse(["ssh", "-R", "/tmp/x:/Users/me/.gnupg/S.gpg-agent.ssh", "host"])?.forwardsAgent == true)
+        #expect(SSH.parse(["ssh", "-L", "8080:localhost:80", "host"])?.forwardsAgent == false)
+        #expect(SSH.parse(["ssh", "-o", "Include /tmp/evil.conf", "github.com"])?.rerouted == true)
+    }
+
+    @Test func lookAlikeSpacesCantFakeTheServer() {
+        let call = SSH.parse(["ssh", "git@evil.example", "git-receive-pack 'acme/web\u{00A0}on\u{00A0}github.com'"])
+        #expect(call?.action == "run a command on evil.example")
+        #expect(SSH.parse(["ssh", "git@evil.example", "git-receive-pack 'acme/web'"])?.action == "push to acme/web on evil.example")
+    }
+
+    @Test func temporaryFoldersAreFlagged() {
+        #expect(Tool.isTemporaryLocation("/tmp/x/claude"))
+        #expect(Tool.isTemporaryLocation("/private/var/folders/ab/T/claude"))
+        #expect(Tool.isTemporaryLocation(NSHomeDirectory() + "/Downloads/claude"))
+        #expect(!Tool.isTemporaryLocation(NSHomeDirectory() + "/.local/bin/claude"))
+    }
+
+    @Test func protectedFoldersIgnoreCaseAndAliases() {
+        let home = NSHomeDirectory()
+        #expect(!Place.canRead(home + "/documents/x"))
+        #expect(!Place.canRead(home + "/DOWNLOADS"))
+        #expect(!Place.canRead("/System/Volumes/Data" + home + "/Documents/x"))
+        #expect(!Place.canRead(home + "/Library/Containers/com.example/Data"))
+        #expect(Place.canRead(home))
+    }
+
+    @Test func headersAreRedacted() {
+        #expect(Sanitize.redact(["curl", "-HAuthorization: token abcdef0123456789"]) == ["curl", "-H•••"])
+        #expect(Sanitize.redact(["git", "-c", "http.extraHeader=Authorization: Basic eDp5", "fetch"]) == ["git", "-c", "•••", "fetch"])
+    }
 }

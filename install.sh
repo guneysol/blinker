@@ -15,6 +15,12 @@ set -euo pipefail
 main() {
     local repo=https://github.com/guneysol/blinker
 
+    # Blinker runs as you. Under sudo it would install a root-owned app and could start it as root.
+    if [[ $EUID -eq 0 ]]; then
+        echo "Please run this without sudo. Blinker installs and runs as your own user."
+        exit 1
+    fi
+
     # /usr/bin/swift exists even without the tools (it is an installer stub), so ask xcode-select.
     if ! xcode-select -p >/dev/null 2>&1; then
         echo "Blinker builds from source and needs Apple's developer tools."
@@ -34,6 +40,8 @@ main() {
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
     git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$ref" "$repo" "$dir"
+    # The exact code being built. Each release's notes list its commit, so you can compare.
+    echo "Building commit $(git -C "$dir" rev-parse HEAD)"
     "$dir/build.sh" --install
     echo
     echo "Like it? A star helps others find it: https://github.com/guneysol/blinker"

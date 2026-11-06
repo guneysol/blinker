@@ -25,6 +25,7 @@ enum Processes {
             guard sysctl(&mib, 4, nil, &size, nil, 0) == 0 else { return [:] }
             size += size / 4 * attempt
             list = [kinfo_proc](repeating: kinfo_proc(), count: size / stride)
+            size = list.count * stride // never claim more room than the array really has
             if sysctl(&mib, 4, &list, &size, nil, 0) == 0 { break }
             guard errno == ENOMEM, attempt < 4 else { return [:] }
         }
