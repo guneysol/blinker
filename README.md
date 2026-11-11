@@ -24,7 +24,7 @@ request times out.
 logins through `gpg-agent`, `ssh-agent` or `yubikey-agent`, and the key is set to require a
 touch. FIDO2 keys (`sk-ssh-…` keys, passkeys) aren't supported yet.
 
-**You need** macOS 14 or later, Apple's developer tools (`xcode-select --install`), and an admin
+**You need** macOS 14 or later, Apple's developer tools (`xcode-select --install`), GnuPG (`brew install gnupg`), and an admin
 account, because macOS only lets admins read the system log that Blinker watches.
 
 ## Install
@@ -45,7 +45,10 @@ a touch: check `ykman openpgp info` (or `ykman piv info` for PIV keys), or see t
 
 The installer needs no sudo, touches nothing else, and prints the exact commit it builds, which
 is listed in the [release notes](https://github.com/guneysol/blinker/releases). It trusts this
-GitHub account; the build-it-yourself steps below also check the release's signature.
+GitHub account for the installer itself. It verifies release signatures against the pinned
+maintainer fingerprint `9D81BD4F85757F958E1C2611897F6CFCDBEFF338` before building.
+For stronger bootstrap protection, keep a reviewed installer locally or fetch it by a full
+commit SHA you have independently verified; a mutable installer can remove its own checks.
 
 <details>
 <summary><b>Prefer to look first?</b></summary>
@@ -143,8 +146,11 @@ below).
 <details>
 <summary><b>Can't I just make my key ask less?</b></summary>
 
-Yes, and that pairs well with Blinker. With the `cached` touch policy, one touch covers 15 seconds
-of requests, so a push that authenticates twice needs only one touch. For SSH:
+For stronger protection, keep touch required for every operation (`on`). With the optional
+`cached` touch policy, one touch covers 15 seconds
+of requests, including requests from other programs with access to your agent. Those requests
+may not wait for a touch, so Blinker cannot alert you to them. This trades security for
+convenience. If you deliberately accept that tradeoff, for SSH:
 
 ```bash
 ykman openpgp keys set-touch aut cached
@@ -158,8 +164,7 @@ Use `sig` instead of `aut` for signing. Check your current policies with `ykman 
 
 Two programs asked your key's agent at the same moment, for example two fetches. Your touch goes
 to whichever one the agent serves first, which can't be seen from outside, so Blinker names both
-instead of guessing. Click the notification to open the menu, where each has a Stop button. A
-connection older than a minute is listed as idle (often a stuck `git fetch`).
+instead of guessing. Click the notification to open the menu, where each has a Stop button. Every connected client remains a candidate, regardless of its age.
 </details>
 
 <details>

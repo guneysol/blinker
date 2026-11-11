@@ -143,13 +143,14 @@ private func proc(_ exe: String, _ argv: [String], name: String? = nil, started:
 }
 
 @Suite struct Waits {
-    @Test func oneFreshClientIsTheLikelyAsker() {
+    @Test func olderClientRemainsACandidate() {
         let now = Date()
         let old = Request.demo.with(started: now.addingTimeInterval(-600))
         let new = Request.demo.with(started: now.addingTimeInterval(-1))
         let wait = Wait(began: now, requests: [new, old], looked: true)
-        #expect(wait.likely == new)
-        #expect(wait.idle == [old])
+        #expect(wait.likely == nil)
+        #expect(wait.fresh == [new, old])
+        #expect(wait.idle.isEmpty)
     }
 
     @Test func twoFreshClientsAreAmbiguous() {
@@ -158,7 +159,7 @@ private func proc(_ exe: String, _ argv: [String], name: String? = nil, started:
         #expect(wait.likely == nil)
         #expect(wait.headline == "One of 2 programs is asking")
         // The same request twice is said once.
-        #expect(Store.notificationText(wait).body == "Claude Code: Push to guneysol/blinker on github.com (2 requests)")
+        #expect(Store.notificationText(wait).body == "SSH destination unverified: github.com (configuration may override it)\nClaude Code: Push to guneysol/blinker on github.com (2 requests)")
     }
 
     @Test func differentAskersAreAllNamed() {
@@ -166,7 +167,7 @@ private func proc(_ exe: String, _ argv: [String], name: String? = nil, started:
         let fetch = Request(pid: 2, started: now, exe: "/usr/bin/ssh", knownLocation: true, who: "Codex",
                             action: "fetch from acme/api on github.com", command: "ssh", place: nil, host: "github.com")
         let wait = Wait(began: now, requests: [Request.demo.with(started: now), fetch], looked: true)
-        #expect(Store.notificationText(wait).body == "Claude Code: Push to guneysol/blinker on github.com\nor Codex: Fetch from acme/api on github.com")
+        #expect(Store.notificationText(wait).body == "SSH destination unverified: github.com (configuration may override it)\nClaude Code: Push to guneysol/blinker on github.com\nor Codex: Fetch from acme/api on github.com")
         #expect(wait.summary == "Push to guneysol/blinker or Fetch from acme/api")
     }
 
@@ -174,11 +175,11 @@ private func proc(_ exe: String, _ argv: [String], name: String? = nil, started:
         #expect(Wait(began: Date(), requests: [], looked: true).headline == "An unknown program is asking")
     }
 
-    @Test func anIdleConnectionIsNeverTheAnswer() {
+    @Test func longRunningClientRemainsVisible() {
         let now = Date()
         let wait = Wait(began: now, requests: [Request.demo.with(started: now.addingTimeInterval(-600))], looked: true)
-        #expect(wait.likely == nil)
-        #expect(wait.headline == "An unknown program is asking")
+        #expect(wait.likely != nil)
+        #expect(wait.headline == Request.demo.headline)
     }
 
     @Test func warningsLeadTheNotification() {
@@ -188,7 +189,7 @@ private func proc(_ exe: String, _ argv: [String], name: String? = nil, started:
         let text = Store.notificationText(Wait(began: now, requests: [odd], looked: true))
         #expect(text.body.hasPrefix("Unusual program: /tmp/ssh"))
         #expect(Store.notificationText(Wait(began: now, requests: [Request.demo.with(started: now)], looked: true)).body
-                == "Claude Code: Push to guneysol/blinker on github.com")
+                == "SSH destination unverified: github.com (configuration may override it)\nClaude Code: Push to guneysol/blinker on github.com")
     }
 
     @Test func timeExtensionLinesAreRevalidated() {
@@ -254,5 +255,47 @@ extension Request {
     @Test func headersAreRedacted() {
         #expect(Sanitize.redact(["curl", "-HAuthorization: token abcdef0123456789"]) == ["curl", "-H•••"])
         #expect(Sanitize.redact(["git", "-c", "http.extraHeader=Authorization: Basic eDp5", "fetch"]) == ["git", "-c", "•••", "fetch"])
+    }
+}
+
+@Suite struct SecurityRegressions {
+    @Test func optionsAfterDestinationAreParsed() throws {
+        let call = try #require(SSH.parse(["ssh", "github.com", "-o", "HostName=attacker.invalid", "-A"]))
+        #expect(call.rerouted)
+        #expect(call.forwardsAgent)
+        #expect(call.remoteCommand.isEmpty)
+        #expect(SSH.parse(["ssh", "host", "-o"]) == nil)
+        #expect(SSH.parse(["ssh", "host", "echo", "-A"])?.forwardsAgent == false)
+        #expect(SSH.parse(["ssh", "--", "host", "-A"])?.forwardsAgent == false)
+    }
+    @Test func oldSuspiciousClientStillWarns() {
+        let old = Request(pid: 1, started: Date().addingTimeInterval(-600), exe: "/tmp/client",
+                          knownLocation: false, who: nil, action: "use your key", command: "client", place: nil)
+        let wait = Wait(began: Date(), requests: [old], looked: true)
+        #expect(Store.notificationText(wait).body.hasPrefix("Unusual program:"))
+    }
+}
+
+@Suite struct RefreshRegressions {
+    @Test func departuresAndChangedDescriptionsRefresh() {
+        let now = Date()
+        let first = Request(pid: 12, started: now, exe: "/usr/bin/ssh", knownLocation: true,
+                            who: nil, action: "connect to first", command: "ssh first", place: nil)
+        let second = Request(pid: 13, started: now, exe: "/usr/bin/ssh", knownLocation: true,
+                             who: nil, action: "connect to second", command: "ssh second", place: nil)
+        var wait = Wait(began: now, requests: [first, second], looked: true)
+        let refreshed1 = wait.refreshRequests([second])
+        #expect(refreshed1)
+        #expect(wait.likely?.id == second.id)
+        let changed = Request(pid: 13, started: now, exe: "/usr/bin/ssh", knownLocation: true,
+                              who: nil, action: "connect to changed", command: "ssh changed", place: nil)
+        let refreshed2 = wait.refreshRequests([changed])
+        #expect(refreshed2)
+        #expect(wait.likely?.id == second.id)
+        #expect(Store.notificationText(wait).body.contains("changed"))
+        let refreshed3 = wait.refreshRequests([changed])
+        #expect(!refreshed3)
+        let refreshed4 = wait.refreshRequests([])
+        #expect(refreshed4)
     }
 }

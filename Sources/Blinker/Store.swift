@@ -19,15 +19,29 @@ struct Wait: Identifiable {
     var looked = false
     var stopped: Set<UUID> = []
 
-    /// A program that connected in the last minute. Older connections are usually idle or stuck
-    /// (a hung `git fetch`), so they're listed but never offered as the answer.
-    static let freshness: TimeInterval = 60
-    var fresh: [Request] { requests.filter { began.timeIntervalSince($0.started) < Self.freshness } }
-    var idle: [Request] { requests.filter { began.timeIntervalSince($0.started) >= Self.freshness } }
+    // Connection activity cannot be inferred from process age. Every connected client
+    // remains a candidate, including long-running forwarded-agent clients.
+    var fresh: [Request] { requests }
+    var idle: [Request] { [] }
+    var likely: Request? { requests.count == 1 ? requests[0] : nil }
 
-    /// The single best guess: exactly one program connected just now. With none, or several,
-    /// Blinker lists every candidate rather than guess.
-    var likely: Request? { fresh.count == 1 ? fresh[0] : nil }
+    mutating func refreshRequests(_ fresh: [Request]) -> Bool {
+        func key(_ r: Request) -> String { "\(r.pid)/\(r.started.timeIntervalSince1970)" }
+        // Keep the same Request (and so its Stop state) for programs still connected.
+        let known = Dictionary(requests.map { (key($0), $0) }, uniquingKeysWith: { a, _ in a })
+        let merged = fresh.map { request in
+            var updated = request
+            if let old = known[key(request)] { updated.id = old.id }
+            return updated
+        }
+        func description(_ r: Request) -> String {
+            [key(r), r.headline, r.command, r.place ?? "", r.host ?? "", r.exe,
+             r.warnings.joined(separator: "\n")].joined(separator: "\n")
+        }
+        guard merged.map(description) != requests.map(description) else { return false }
+        requests = merged
+        return true
+    }
 
     var headline: String {
         if let likely { return likely.headline }
@@ -246,19 +260,12 @@ final class Store: NSObject, ObservableObject, UNUserNotificationCenterDelegate 
 
     private func update(_ fresh: [Request], for id: UUID) {
         guard var wait = current, wait.id == id else { return }
-        func key(_ r: Request) -> String { "\(r.pid)/\(r.started.timeIntervalSince1970)" }
-        // Keep the same Request (and so its Stop state) for programs still connected.
-        let known = Dictionary(wait.requests.map { (key($0), $0) }, uniquingKeysWith: { a, _ in a })
-        let merged = fresh.map { known[key($0)] ?? $0 }
-        guard merged.map(key) != wait.requests.map(key) else { return }
-        let freshBefore = Set(wait.fresh.map(key))
-        wait.requests = merged
+        guard wait.refreshRequests(fresh) else { return }
         current = wait
-        log.info("connected programs changed: now \(merged.count, privacy: .public)")
-        // Something new asked during this wait (it may be what your next touch approves), so
-        // replace the banner, with its sound. Programs that just left change only the menu.
-        let joined = !Set(wait.fresh.map(key)).subtracting(freshBefore).isEmpty
-        if notify, joined { post(wait) }
+        log.info("connected programs changed: now \(wait.requests.count, privacy: .public)")
+        // Departures and changed descriptions matter just as much as arrivals.
+        if notify { post(wait) }
+
     }
 
     // MARK: - Stopping a request

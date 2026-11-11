@@ -32,7 +32,7 @@ Blinker makes this harder, but can't make it impossible:
   program connected to your key's agent, whatever it calls itself.
 - It flags executables in unusual locations, names that don't match the file, and any program in
   the chain that started the request from a temporary or download folder.
-- It always shows the server an SSH request goes to, reads `-o` options the way ssh itself does,
+- It shows the command-line SSH destination as unverified, because SSH configuration may override it. It parses options before and after the destination,
   and warns when options send the connection elsewhere or forward your key.
 - If a new program asks during a wait (your next touch may go to it), the notification is replaced
   and plays its sound again.
@@ -40,7 +40,7 @@ Blinker makes this harder, but can't make it impossible:
   inside `git commit` can't borrow it, and won't let an SSH command chained after
   `git-upload-pack` pass for a fetch. It flags SSH options that change the real destination or
   forward your key.
-- It names a single program only when exactly one connected just before the wait; with several,
+- It names a single program only when exactly one is connected; with several,
   it lists them all as candidates. Warnings come first in the notification, so a long name can't push them out of view.
 - It strips invisible and bidirectional characters, so text can't be made to read differently.
 
@@ -55,6 +55,8 @@ your key for an action you didn't start**, whatever the notification says.
 ## Releases
 
 - Release tags are signed with the maintainer's hardware key; check one with `git tag -v <tag>`
-  (the one-line installer doesn't check signatures; the README's "build it yourself" steps do).
+  (the installer checks the signature against a pinned signing fingerprint before building).
+  The installer itself is a bootstrap trust dependency: review and pin its full commit SHA
+  through a trusted channel. A compromised mutable installer can bypass its own checks.
 - The installer builds the newest `vX.Y.Z` tag from source and never downloads a prebuilt binary.
 - Only the latest release is supported. To update, run the install command again.

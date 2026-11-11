@@ -7,7 +7,7 @@
 # /Applications isn't writable without sudo). No sudo, nothing else on your Mac is touched,
 # and the temporary folder is deleted afterwards.
 #
-# Set BLINKER_REF=main (or any tag) to build something other than the latest release.
+# Set BLINKER_REF=vX.Y.Z to select another signed release.
 set -euo pipefail
 
 # Everything lives in main(), which only runs on the last line, so a download that is cut off
@@ -28,6 +28,10 @@ main() {
         exit 1
     fi
 
+    command -v gpg >/dev/null 2>&1 || {
+        echo "Release verification requires GnuPG. Install it with: brew install gnupg"
+        exit 1
+    }
     local ref="${BLINKER_REF:-}"
     if [[ -z "$ref" ]]; then
         # Releases only (vX.Y.Z): a pre-release tag like v1.0-rc1 is never picked as "latest".
@@ -35,6 +39,10 @@ main() {
             | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
         [[ -n "$ref" ]] || { echo "Couldn't find a Blinker release on GitHub."; exit 1; }
     fi
+    [[ "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+        echo "Only signed release tags (vX.Y.Z) may be installed. Build development branches manually."
+        exit 1
+    }
     echo "Installing Blinker ${ref}..."
 
     dir=$(mktemp -d)
@@ -42,8 +50,25 @@ main() {
     # Fetch just that tag (or branch) and check it out. `git clone --branch <signed tag>` works
     # too, but prints a scary-looking "is not a commit" warning for signed tags.
     git -C "$dir" init --quiet
-    git -C "$dir" fetch --quiet --depth 1 "$repo" "$ref"
-    git -C "$dir" -c advice.detachedHead=false checkout --quiet FETCH_HEAD
+    git -C "$dir" fetch --quiet --depth 1 "$repo" "refs/tags/$ref:refs/tags/$ref"
+    # A fresh keyring prevents local trust configuration from changing acceptance.
+    local keyring="$dir/verify-keyring"
+    mkdir -m 700 "$keyring"
+    # Public-key verification does not need an agent or access to private keys.
+    echo no-autostart > "$keyring/gpg.conf"
+    curl -fsSL https://github.com/guneysol.gpg -o "$dir/maintainer.asc"
+    GNUPGHOME="$keyring" gpg --batch --quiet --import "$dir/maintainer.asc"
+    local signature
+    signature=$(GNUPGHOME="$keyring" git -C "$dir" -c gpg.format=openpgp -c gpg.program=gpg verify-tag --raw "$ref" 2>&1) || {
+        echo "Release signature verification failed. Nothing was built or installed."
+        exit 1
+    }
+    # Pinned release signer; names and GitHub account keys alone are not trusted.
+    echo "$signature" | grep -Eq '^\[GNUPG:\] VALIDSIG 9D81BD4F85757F958E1C2611897F6CFCDBEFF338 ' || {
+        echo "Release was not signed by the pinned maintainer key."
+        exit 1
+    }
+    git -C "$dir" -c advice.detachedHead=false checkout --quiet "$ref"
     # The exact code being built. Each release's notes list its commit, so you can compare.
     echo "Building commit $(git -C "$dir" rev-parse HEAD)"
     "$dir/build.sh" --install
