@@ -32,12 +32,12 @@ account, because macOS only lets admins read the system log that Blinker watches
 Download the installer from **this repository**, inspect it, then run it:
 
 ```bash
-curl -fsSLo blinker-install.sh https://raw.githubusercontent.com/guneysol/blinker/f974dae57a60a9bd2767a2b007a462eb5fa4e092/install.sh
+curl -fsSLo blinker-install.sh https://raw.githubusercontent.com/guneysol/blinker/61b634540b79a10cebe8af7a3ee469913dbd0f4a/install.sh
 less blinker-install.sh
 bash blinker-install.sh
 ```
 
-[View the installer](https://github.com/guneysol/blinker/blob/f974dae57a60a9bd2767a2b007a462eb5fa4e092/install.sh) ·
+[View the installer](https://github.com/guneysol/blinker/blob/61b634540b79a10cebe8af7a3ee469913dbd0f4a/install.sh) ·
 [Releases](https://github.com/guneysol/blinker/releases) · [Security details](SECURITY.md) ·
 [Uninstall](#update-and-uninstall)
 
