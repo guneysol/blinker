@@ -181,7 +181,7 @@ A downloaded app has to be notarized by Apple, or Gatekeeper blocks it. Building
 avoids that, and the whole app is about 2,200 lines of Swift, easy to read before you run it.
 </details>
 
-Stop sends a termination request. “Stopping…” means cancellation is pending; a process may ignore it. The request disappears when Blinker observes that it disconnected. Do not touch the key based on a pending cancellation.
+Stop sends a termination request. “Stop requested” means cancellation is pending; a process may ignore it. The client disappears when it disconnects, but the hardware may keep blinking until its operation times out. Blinker keeps a “Cancellation requested — don’t touch” warning until that wait ends. Do not touch the key based on a pending cancellation.
 
 ## Update and uninstall
 

@@ -98,10 +98,20 @@ private struct Waiting: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
+            if !wait.stopped.isEmpty {
+                Text("Cancellation requested — don’t touch")
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(.orange)
+                    .padding(.horizontal, Metrics.inset)
+                Text("Wait for blinking to stop. The key may still be processing the canceled request until it times out.")
+                    .font(.system(size: 11)).padding(.horizontal, Metrics.inset)
+            }
             if let likely = wait.likely {
                 asker(likely, highlighted: true)
             } else if !wait.looked {
                 Row(symbol: "key.horizontal.fill", active: true, title: "Checking who asked…", detail: "")
+            } else if wait.fresh.isEmpty && !wait.stopped.isEmpty {
+                Row(symbol: "hourglass", active: true, title: "Client disconnected",
+                    detail: "Waiting for the key to finish.", wraps: true)
             } else if wait.fresh.isEmpty {
                 Row(symbol: "key.horizontal.fill", active: true, title: "No program Blinker can see is asking",
                     detail: "Don't touch your key unless you started something.", wraps: true)
@@ -153,7 +163,7 @@ private struct Waiting: View {
 
     @ViewBuilder private func stop(_ request: Request, stopped: Bool) -> some View {
         if stopped {
-            Text("Stopping…").font(.system(size: 11)).foregroundStyle(.orange)
+            Text("Stop requested").font(.system(size: 11)).foregroundStyle(.orange)
                 .help("Termination requested, not confirmed. The process may ignore it. Do not touch your key while cancellation is pending.")
         } else if store.stopFailed == request.id {
             Text("Couldn't stop").font(.system(size: 11)).foregroundStyle(.secondary)
