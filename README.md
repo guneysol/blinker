@@ -29,53 +29,50 @@ account, because macOS only lets admins read the system log that Blinker watches
 
 ## Install
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/guneysol/blinker/aa9178ed54b1e8cf1c3524d6d2d53e50f65e0ff0/install.sh | bash
-```
-
-It builds the latest release from source (about a minute the first time), installs
-**Blinker.app** to your Applications folder and opens it. A key icon appears in your menu bar.
-Allow notifications when macOS asks, then turn on **Launch at Login** from the `⋯` menu. macOS
-doesn't show an "unidentified developer" warning, because the app is built on your Mac.
-
-**Check it works:** run `ssh -T git@github.com` (or anything that uses your key). When the key
-blinks, Blinker should notify you within a second. If nothing happens, your key may not require
-a touch: check `ykman openpgp info` (or `ykman piv info` for PIV keys), or see the
-[FAQ](#faq).
-
-The installer needs no sudo, touches nothing else, and prints the exact commit it builds, which
-is listed in the [release notes](https://github.com/guneysol/blinker/releases). The command pins the reviewed installer to an immutable commit. It verifies release signatures against the pinned
-maintainer fingerprint `9D81BD4F85757F958E1C2611897F6CFCDBEFF338` before building.
-For stronger bootstrap protection, keep a reviewed installer locally or fetch it by a full
-commit SHA you have independently verified; Keep the pinned URL when sharing the install command.
-
-<details>
-<summary><b>Prefer to look first?</b></summary>
-
-Download the script, read it, then run it:
+Download the installer from **this repository**, inspect it, then run it:
 
 ```bash
-curl -fsSLo install.sh https://raw.githubusercontent.com/guneysol/blinker/aa9178ed54b1e8cf1c3524d6d2d53e50f65e0ff0/install.sh
-less install.sh
-bash install.sh
+curl -fsSLo blinker-install.sh https://raw.githubusercontent.com/guneysol/blinker/f974dae57a60a9bd2767a2b007a462eb5fa4e092/install.sh
+less blinker-install.sh
+bash blinker-install.sh
 ```
 
-Or build it yourself and check the release signature. This needs GnuPG (`brew install gnupg`).
-First import the maintainer's signing key, then clone, pick the newest release and verify it:
+[View the installer](https://github.com/guneysol/blinker/blob/f974dae57a60a9bd2767a2b007a462eb5fa4e092/install.sh) ·
+[Releases](https://github.com/guneysol/blinker/releases) · [Security details](SECURITY.md) ·
+[Uninstall](#update-and-uninstall)
+
+The URL pins the installer to a reviewed commit in `guneysol/blinker`. It downloads the newest
+stable tag from that same repository and verifies its signature, signing fingerprint and signed
+version name **before checking out or building any release code**. It rejects releases below
+v0.1.3 or your installed version unless you explicitly request a rollback.
+
+It builds Blinker locally, replaces only an existing Blinker installation with the matching app
+identifier, installs to `/Applications` (or `~/Applications` if needed), and opens the app.
+Temporary build files are removed afterwards. It does not use sudo, change key touch policies,
+or edit your SSH/GPG configuration. Internet access is needed to download the source and public
+signing key; normal app operation has no telemetry or network client.
+
+Allow notifications if you want alerts. **Launch at Login is opt-in** in the `⋯` menu.
+The locally built app has an ad-hoc signature; it is **not Developer ID signed or notarized by Apple**.
+Release signatures establish who signed the source, not a guarantee that it has no bugs.
+
+The pinned release-signing fingerprint is:
+`9D81BD4F85757F958E1C2611897F6CFCDBEFF338`.
+A commit-pinned URL cannot protect against a look-alike repository or altered instructions:
+check that the owner and repository are exactly `guneysol/blinker`.
+
+**Check it works:** start an SSH login using your key:
 
 ```bash
-curl -fsSL https://github.com/guneysol.gpg | gpg --import
-git clone https://github.com/guneysol/blinker && cd blinker
-tag=$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
-git tag -v "$tag" && git checkout -q "$tag" && ./build.sh --install
+ssh -T -o ControlPath=none git@github.com
 ```
 
-Look for `Good signature from "Guney …"`. gpg also prints "This key is not certified with a
-trusted signature"; that's expected for a key you just imported.
-</details>
+When the key blinks, Blinker should notify you. Only touch for the operation you just started.
+An existing connection or cached touch can complete without blinking; Blinker cannot report a
+wait that never happens. See the [FAQ](#faq) if nothing appears.
 
-> **Blinker tells you *that* your key is waiting. *Who* asked is a best guess, which any program
-> on your Mac could fake. Only touch your key for something you just started.**
+> Blinker reports a likely requester. It does not authenticate the requester, verify the SSH
+> server, or authorize an operation. Only touch your key for something you started.
 
 ## Why
 
@@ -116,19 +113,21 @@ matches it to the program that asked.
 
 ## Security and privacy
 
-"Your key is waiting" comes from Apple's smart-card driver, and other programs can't fake it.
+The wait indication comes from time-extension events emitted by Apple’s smart-card driver.
+It is a detection heuristic, not a cryptographic statement about the pending operation.
 Who asked and why is read from the programs connected to your key's agent, and any program
 running as you can fake those details. See [SECURITY.md](SECURITY.md) for the full picture and
 to report a vulnerability.
 
-- It makes **no network connections**. The links in the `⋯` menu open in your browser.
+- The app has **no telemetry or network client**. Menu links open in your browser only when clicked.
 - It runs as you, never asks for sudo, and can only stop your own processes.
 - It saves two settings (notifications and sound). History stays in memory until you quit.
 - Notifications name the program and repo, never the command, and are removed once you touch the
   key. Raw command arguments are hidden in the menu and history to avoid exposing credentials.
-- To tell who asked, it reads the arguments and folders of your own running programs (never
-  their environment variables) and the branch from `.git/HEAD`. It never looks inside Desktop,
-  Documents, Downloads, iCloud Drive or network drives, so it doesn't trigger privacy prompts.
+- To infer the requester, it reads process arguments, executable paths, folders and agent socket
+  metadata for your user. It does not intentionally parse environment variables or read private-key files.
+  Git context reads are limited to small `.git` and `HEAD` files; protected folders, non-local
+  mounts and symlink paths are skipped. If a path cannot be checked safely, its branch is omitted.
 - It's built from source on your Mac and isn't notarized by Apple.
 
 ## FAQ
@@ -177,8 +176,9 @@ Without admin rights it shows "Not watching your key" and says why.
 <details>
 <summary><b>Why is there no downloadable app or Homebrew cask?</b></summary>
 
-A downloaded app has to be notarized by Apple, or Gatekeeper blocks it. Building from source
-avoids that, and the whole app is about 2,200 lines of Swift, easy to read before you run it.
+We currently distribute source, not a Developer ID–signed and notarized download.
+The source-build path remains inspectable, but needs developer tools and GnuPG.
+Do not disable Gatekeeper or remove quarantine attributes to install Blinker.
 </details>
 
 Stop sends a termination request. “Stop requested” means cancellation is pending; a process may ignore it. The client disappears when it disconnects, but the hardware may keep blinking until its operation times out. Blinker keeps a “Cancellation requested — don’t touch” warning until that wait ends. Do not touch the key based on a pending cancellation.
