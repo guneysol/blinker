@@ -71,7 +71,7 @@ enum Snapshot {
 
     private static func write(to path: String, dark: Bool, demo: Bool, several: Bool, scene: Bool) async {
         let store = Store()
-        if demo { store.showDemo(several: several) }
+        if demo { store.showDemo(several: several, cancelled: CommandLine.arguments.contains("--cancelled")) }
         let root = scene
             ? AnyView(DemoScene(dark: dark, tweet: CommandLine.arguments.contains("--tweet")).environmentObject(store))
             : AnyView(MenuView().environmentObject(store).background(.windowBackground))

@@ -308,3 +308,22 @@ extension Request {
         #expect(refreshed4)
     }
 }
+
+@Suite struct Audit20261111 {
+    @Test func quotedSSHKeywordsWarn() {
+        #expect(SSH.parse(["ssh", "-o", "\"HostName\" attacker.invalid", "github.com"])?.rerouted == true)
+        #expect(SSH.parse(["ssh", "-o", "\"ForwardAgent\" yes", "github.com"])?.forwardsAgent == true)
+        #expect(SSH.parse(["ssh", "-o", "\rHostName attacker.invalid", "github.com"])?.rerouted == true)
+    }
+}
+
+@Suite struct CancellationFeedback {
+    @Test func cancellationWarningSurvivesClientDeparture() {
+        let request = Request.demo
+        var wait = Wait(began: Date(), requests: [request], looked: true, stopped: [request.id])
+        #expect(Store.notificationText(wait).title.contains("don’t touch"))
+        _ = wait.refreshRequests([])
+        #expect(Store.notificationText(wait).title.contains("don’t touch"))
+        #expect(Store.notificationText(wait).body.contains("times out"))
+    }
+}

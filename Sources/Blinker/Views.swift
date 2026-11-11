@@ -98,10 +98,20 @@ private struct Waiting: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
+            if !wait.stopped.isEmpty {
+                Text("Cancellation requested — don’t touch")
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(.orange)
+                    .padding(.horizontal, Metrics.inset)
+                Text("Wait for blinking to stop. The key may still be processing the canceled request until it times out.")
+                    .font(.system(size: 11)).padding(.horizontal, Metrics.inset)
+            }
             if let likely = wait.likely {
                 asker(likely, highlighted: true)
             } else if !wait.looked {
                 Row(symbol: "key.horizontal.fill", active: true, title: "Checking who asked…", detail: "")
+            } else if wait.fresh.isEmpty && !wait.stopped.isEmpty {
+                Row(symbol: "hourglass", active: true, title: "Client disconnected",
+                    detail: "Waiting for the key to finish.", wraps: true)
             } else if wait.fresh.isEmpty {
                 Row(symbol: "key.horizontal.fill", active: true, title: "No program Blinker can see is asking",
                     detail: "Don't touch your key unless you started something.", wraps: true)
@@ -153,7 +163,8 @@ private struct Waiting: View {
 
     @ViewBuilder private func stop(_ request: Request, stopped: Bool) -> some View {
         if stopped {
-            Text("Stopped").font(.system(size: 11)).foregroundStyle(.secondary)
+            Text("Stop requested").font(.system(size: 11)).foregroundStyle(.orange)
+                .help("Termination requested, not confirmed. The process may ignore it. Do not touch your key while cancellation is pending.")
         } else if store.stopFailed == request.id {
             Text("Couldn't stop").font(.system(size: 11)).foregroundStyle(.secondary)
         } else {
@@ -197,7 +208,7 @@ private struct Connected: View {
     private var detail: String {
         var parts = [request.who ?? "Unrecognized program"]
         parts.append(idle ? "idle since \(request.started.formatted(date: .omitted, time: .shortened))" : "also connected")
-        if stopped { parts.append("stopped") }
+        if stopped { parts.append("stop requested") }
         if !request.warnings.isEmpty { parts.append("check this") }
         if store.stopFailed == request.id { parts.append("couldn't stop") }
         return parts.joined(separator: " · ")
@@ -240,7 +251,7 @@ private struct HistoryRow: View {
             for r in wait.fresh where !whos.contains(r.who ?? "A program") { whos.append(r.who ?? "A program") }
             parts.append("one of " + whos.joined(separator: ", "))
         }
-        if !wait.stopped.isEmpty { parts.append("stopped") }
+        if !wait.stopped.isEmpty { parts.append("stop requested") }
         return parts.isEmpty ? "Couldn't tell who asked" : parts.joined(separator: " · ")
     }
 }

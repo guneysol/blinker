@@ -287,15 +287,19 @@ final class Store: NSObject, ObservableObject, UNUserNotificationCenterDelegate 
             stopFailed = request.id
             return false
         }
+        // SIGTERM delivery is not confirmation of exit. Keep showing Stopping until
+        // the normal connection refresh removes the client.
         current?.stopped.insert(request.id)
+        if notify, let current { post(current) }
         return true
     }
 
     func clearHistory() { history.removeAll() }
 
     /// Made-up requests for `--snapshot --demo`, so screenshots never show real projects.
-    func showDemo(several: Bool = false) {
+    func showDemo(several: Bool = false, cancelled: Bool = false) {
         current = several ? Demo.several : Demo.live
+        if cancelled, let id = current?.requests.first?.id { current?.stopped.insert(id) }
         history = Demo.history
     }
 
@@ -305,6 +309,10 @@ final class Store: NSObject, ObservableObject, UNUserNotificationCenterDelegate 
     /// any, comes first so it can't be pushed out of view by a long name. The repo, branch,
     /// server and command stay in the menu: Notification Center keeps these on disk.
     nonisolated static func notificationText(_ wait: Wait) -> (title: String, body: String) {
+        if !wait.stopped.isEmpty {
+            return ("Cancellation requested — don’t touch",
+                    "Your key may keep blinking until the operation times out. Wait for blinking to stop before starting another request.")
+        }
         let ask: String
         if wait.likely != nil || wait.askers.count == 1 {
             // One asker, or the same request twice: say it once.
