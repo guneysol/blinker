@@ -30,7 +30,7 @@ account, because macOS only lets admins read the system log that Blinker watches
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/guneysol/blinker/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/guneysol/blinker/aa9178ed54b1e8cf1c3524d6d2d53e50f65e0ff0/install.sh | bash
 ```
 
 It builds the latest release from source (about a minute the first time), installs
@@ -44,11 +44,10 @@ a touch: check `ykman openpgp info` (or `ykman piv info` for PIV keys), or see t
 [FAQ](#faq).
 
 The installer needs no sudo, touches nothing else, and prints the exact commit it builds, which
-is listed in the [release notes](https://github.com/guneysol/blinker/releases). It trusts this
-GitHub account for the installer itself. It verifies release signatures against the pinned
+is listed in the [release notes](https://github.com/guneysol/blinker/releases). The command pins the reviewed installer to an immutable commit. It verifies release signatures against the pinned
 maintainer fingerprint `9D81BD4F85757F958E1C2611897F6CFCDBEFF338` before building.
 For stronger bootstrap protection, keep a reviewed installer locally or fetch it by a full
-commit SHA you have independently verified; a mutable installer can remove its own checks.
+commit SHA you have independently verified; Keep the pinned URL when sharing the install command.
 
 <details>
 <summary><b>Prefer to look first?</b></summary>
@@ -56,7 +55,7 @@ commit SHA you have independently verified; a mutable installer can remove its o
 Download the script, read it, then run it:
 
 ```bash
-curl -fsSLo install.sh https://raw.githubusercontent.com/guneysol/blinker/main/install.sh
+curl -fsSLo install.sh https://raw.githubusercontent.com/guneysol/blinker/aa9178ed54b1e8cf1c3524d6d2d53e50f65e0ff0/install.sh
 less install.sh
 bash install.sh
 ```
@@ -126,7 +125,7 @@ to report a vulnerability.
 - It runs as you, never asks for sudo, and can only stop your own processes.
 - It saves two settings (notifications and sound). History stays in memory until you quit.
 - Notifications name the program and repo, never the command, and are removed once you touch the
-  key. Commands shown in the menu have tokens and passwords removed, as far as it can tell.
+  key. Raw command arguments are hidden in the menu and history to avoid exposing credentials.
 - To tell who asked, it reads the arguments and folders of your own running programs (never
   their environment variables) and the branch from `.git/HEAD`. It never looks inside Desktop,
   Documents, Downloads, iCloud Drive or network drives, so it doesn't trigger privacy prompts.
@@ -181,6 +180,8 @@ Without admin rights it shows "Not watching your key" and says why.
 A downloaded app has to be notarized by Apple, or Gatekeeper blocks it. Building from source
 avoids that, and the whole app is about 2,200 lines of Swift, easy to read before you run it.
 </details>
+
+Stop sends a termination request. “Stopping…” means cancellation is pending; a process may ignore it. The request disappears when Blinker observes that it disconnected. Do not touch the key based on a pending cancellation.
 
 ## Update and uninstall
 

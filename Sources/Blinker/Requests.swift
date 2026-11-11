@@ -17,7 +17,7 @@ struct Request: Identifiable, Equatable {
     let who: String?
     /// "push to guneysol/portside on github.com", "sign a commit", "connect to example.com".
     let action: String
-    /// The command that asked, redacted and cleaned for display: "git push origin feat".
+    /// Privacy notice: raw command arguments are deliberately never retained for display.
     let command: String
     /// "~/code/orb (feat-x)"
     let place: String?
@@ -112,7 +112,7 @@ enum Requests {
                 ?? git.map { Git.action($0.sub) }
                 ?? tool.action
                 ?? "use your key (\(Sanitize.clean(requester.exe.basename, limit: 40)))",
-            command: Sanitize.clean(Sanitize.redact(shown.argv).joined(separator: " "), limit: 120),
+            command: "Command arguments hidden for privacy",
             place: Place.describe(cwd: shown.cwd.isEmpty ? requester.cwd : shown.cwd),
             host: tool.kind == .ssh ? SSH.parse(requester.argv)?.displayHost : nil,
             launcher: launcher.map { Sanitize.clean($0.exe, limit: 120, keepEnd: true) }
@@ -306,10 +306,14 @@ enum SSH {
     /// skipped, the keyword ends at the first space, tab or "=", and keywords ignore case. So
     /// "\tHostName evil" and "ForwardAgent\tyes" are recognized like their plain spellings.
     static func option(_ raw: String) -> (key: String, value: String) {
-        let blank: (Character) -> Bool = { $0 == " " || $0 == "\t" }
+        let blank: (Character) -> Bool = { $0 == " " || $0 == "\t" || $0 == "\r" || $0 == "\n" }
         let trimmed = raw.drop(while: blank)
-        let key = trimmed.prefix { !blank($0) && $0 != "=" }
-        var rest = trimmed.dropFirst(key.count).drop(while: blank)
+        let quoted = trimmed.first == "\""
+        let body = quoted ? trimmed.dropFirst() : trimmed
+        let key = body.prefix { quoted ? $0 != "\"" : !blank($0) && $0 != "=" }
+        var rest = body.dropFirst(key.count)
+        if quoted, rest.first == "\"" { rest = rest.dropFirst() }
+        rest = rest.drop(while: blank)
         if rest.first == "=" { rest = rest.dropFirst().drop(while: blank) }
         return (key.lowercased(), String(rest).lowercased())
     }

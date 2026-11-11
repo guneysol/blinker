@@ -287,6 +287,8 @@ final class Store: NSObject, ObservableObject, UNUserNotificationCenterDelegate 
             stopFailed = request.id
             return false
         }
+        // SIGTERM delivery is not confirmation of exit. Keep showing Stopping until
+        // the normal connection refresh removes the client.
         current?.stopped.insert(request.id)
         return true
     }

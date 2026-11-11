@@ -308,3 +308,11 @@ extension Request {
         #expect(refreshed4)
     }
 }
+
+@Suite struct Audit20261111 {
+    @Test func quotedSSHKeywordsWarn() {
+        #expect(SSH.parse(["ssh", "-o", "\"HostName\" attacker.invalid", "github.com"])?.rerouted == true)
+        #expect(SSH.parse(["ssh", "-o", "\"ForwardAgent\" yes", "github.com"])?.forwardsAgent == true)
+        #expect(SSH.parse(["ssh", "-o", "\rHostName attacker.invalid", "github.com"])?.rerouted == true)
+    }
+}

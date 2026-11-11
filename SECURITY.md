@@ -17,9 +17,9 @@ You'll be credited unless you'd rather not be.
 - **No network.** Blinker makes no network connections.
 - **No privileges.** It runs as you, never asks for sudo, requests no accessibility, screen
   recording or disk access, and can only signal your own processes.
-- **Stop never hits the wrong process.** Stop works only while the key is still waiting. It
+- **Stop requests termination of the selected process.** Stop works only while the key is still waiting. It
   checks that the process has the same pid and start time, is yours, and is still connected to
-  your key's agent before sending SIGTERM. It never signals the agent itself.
+  your key's agent before sending SIGTERM. It never signals the agent itself. A successful signal does not prove cancellation: a client can ignore SIGTERM. The UI shows “Stopping…” until the client disconnects.
 
 ## What you can't rely on
 
