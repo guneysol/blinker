@@ -129,8 +129,14 @@ private struct Waiting: View {
                 Text(request.title).font(.system(size: 13, weight: .semibold)).lineLimit(2)
                 Text(highlighted ? "\(request.who ?? "An unrecognized program") is asking" : request.who ?? "An unrecognized program")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
-                if let where_ = [request.place, request.host].compactMap({ $0 }).first {
-                    Text(where_).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                if let place = request.place {
+                    Text(place).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                }
+                if let host = request.host, !host.hasSuffix(")") {
+                    Text("Requested host: \(host)")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                        .help("Destination from the SSH command. SSH configuration may override it.")
                 }
                 ForEach(request.warnings, id: \.self) { warning in
                     Text(warning).font(.system(size: 11)).foregroundStyle(.orange).lineLimit(2)

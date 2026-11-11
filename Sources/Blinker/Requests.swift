@@ -21,7 +21,7 @@ struct Request: Identifiable, Equatable {
     let command: String
     /// "~/code/orb (feat-x)"
     let place: String?
-    /// The server it talks to over SSH, as shown: "github.com".
+    /// The requested command-line SSH destination (configuration may override it), as shown: "github.com".
     var host: String? = nil
     /// A program that started the asker from a temporary or download folder, if any.
     var launcher: String? = nil
@@ -619,7 +619,7 @@ extension Request {
     var warnings: [String] {
         var out: [String] = []
         if !knownLocation { out.append("Unusual program: \(exe)") }
-        if let host { out.append(host.hasSuffix(")") ? "Server: \(host)" : "SSH destination unverified: \(host) (configuration may override it)") }
+        if let host, host.hasSuffix(")") { out.append("Requested host: \(host)") }
         if let launcher { out.append("Started from a temporary folder: \(launcher)") }
         return out
     }

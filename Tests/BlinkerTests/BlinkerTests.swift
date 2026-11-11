@@ -159,7 +159,7 @@ private func proc(_ exe: String, _ argv: [String], name: String? = nil, started:
         #expect(wait.likely == nil)
         #expect(wait.headline == "One of 2 programs is asking")
         // The same request twice is said once.
-        #expect(Store.notificationText(wait).body == "SSH destination unverified: github.com (configuration may override it)\nClaude Code: Push to guneysol/blinker on github.com (2 requests)")
+        #expect(Store.notificationText(wait).body == "Claude Code: Push to guneysol/blinker on github.com (2 requests)")
     }
 
     @Test func differentAskersAreAllNamed() {
@@ -167,7 +167,7 @@ private func proc(_ exe: String, _ argv: [String], name: String? = nil, started:
         let fetch = Request(pid: 2, started: now, exe: "/usr/bin/ssh", knownLocation: true, who: "Codex",
                             action: "fetch from acme/api on github.com", command: "ssh", place: nil, host: "github.com")
         let wait = Wait(began: now, requests: [Request.demo.with(started: now), fetch], looked: true)
-        #expect(Store.notificationText(wait).body == "SSH destination unverified: github.com (configuration may override it)\nClaude Code: Push to guneysol/blinker on github.com\nor Codex: Fetch from acme/api on github.com")
+        #expect(Store.notificationText(wait).body == "Claude Code: Push to guneysol/blinker on github.com\nor Codex: Fetch from acme/api on github.com")
         #expect(wait.summary == "Push to guneysol/blinker or Fetch from acme/api")
     }
 
@@ -188,8 +188,17 @@ private func proc(_ exe: String, _ argv: [String], name: String? = nil, started:
                           action: "push to a/b on github.com", command: "ssh", place: nil, host: "github.com")
         let text = Store.notificationText(Wait(began: now, requests: [odd], looked: true))
         #expect(text.body.hasPrefix("Unusual program: /tmp/ssh"))
+        #expect(Store.notificationText(Wait(began: now, requests: [Request.demo], looked: true)).title == "YubiKey needs a touch")
+        for args in [["ssh", "github.com", "-A"], ["ssh", "github.com", "-o", "HostName=example.com"]] {
+            let host = SSH.parse(args)!.displayHost
+            let request = Request(pid: 1, started: now, exe: "/usr/bin/ssh", knownLocation: true,
+                                  who: nil, action: "connect", command: "ssh", place: nil, host: host)
+            let notice = Store.notificationText(Wait(began: now, requests: [request], looked: true))
+            #expect(notice.title == "YubiKey needs a touch. Check first")
+            #expect(notice.body.hasPrefix("Requested host:"))
+        }
         #expect(Store.notificationText(Wait(began: now, requests: [Request.demo.with(started: now)], looked: true)).body
-                == "SSH destination unverified: github.com (configuration may override it)\nClaude Code: Push to guneysol/blinker on github.com")
+                == "Claude Code: Push to guneysol/blinker on github.com")
     }
 
     @Test func timeExtensionLinesAreRevalidated() {
