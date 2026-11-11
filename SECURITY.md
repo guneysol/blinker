@@ -32,8 +32,10 @@ Blinker makes this harder, but can't make it impossible:
   program connected to your key's agent, whatever it calls itself.
 - It flags executables in unusual locations, names that don't match the file, and any program in
   the chain that started the request from a temporary or download folder.
-- It shows the command-line SSH destination as unverified, because SSH configuration may override it. It parses options before and after the destination,
-  and warns when options send the connection elsewhere or forward your key.
+- It labels the command-line SSH destination as "Requested host" in the menu. This is ordinary
+  information, not a verification of the actual server: SSH configuration may override it.
+  It parses options before and after the destination and warns when it detects custom routing,
+  agent forwarding, or a non-ASCII host name.
 - If a new program asks during a wait (your next touch may go to it), the notification is replaced
   and plays its sound again.
 - It uses git's label ("sign a commit") only for the exact signing command git runs, so a hook
