@@ -1,14 +1,49 @@
 #!/bin/bash
 # One-line install: builds the latest Blinker release from source and puts it in Applications.
-#   curl -fsSL https://raw.githubusercontent.com/guneysol/blinker/main/install.sh | bash
+# See README.md for the reviewed, commit-pinned installer URL.
 #
 # What this does: checks for Apple's developer tools, clones the latest release tag into a
 # temporary folder, builds it, and copies Blinker.app to /Applications (or ~/Applications when
-# /Applications isn't writable without sudo). No sudo, nothing else on your Mac is touched,
-# and the temporary folder is deleted afterwards.
+# /Applications isn't writable without sudo). SSH/GPG settings and key policies are unchanged;
+# the temporary source and verification keyring are deleted afterwards.
 #
 # Set BLINKER_REF=vX.Y.Z to select another signed release.
 set -euo pipefail
+
+# This code belongs to the reviewed installer, never to the unverified checkout.
+verify_release() {
+    local checkout="$1" ref="$2" keyring="$3" fingerprint="$4" payload signature
+    [[ "$fingerprint" =~ ^[A-F0-9]{40}$ ]] || return 1
+    [[ "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+    [[ "$(git -C "$checkout" cat-file -t "refs/tags/$ref")" == tag ]] || {
+        echo "Release must be an annotated, signed tag."; return 1;
+    }
+    payload=$(git -C "$checkout" cat-file tag "refs/tags/$ref") || return 1
+    # Check headers only; a message containing a matching tag name must not count.
+    [[ "$(printf '%s\n' "$payload" | sed -n '3p')" == "tag $ref" &&
+       "$(printf '%s\n' "$payload" | sed -n '2p')" == "type commit" ]] || {
+        echo "Signed release name does not match the requested version."; return 1;
+    }
+    signature=$(GNUPGHOME="$keyring" git -C "$checkout" -c gpg.format=openpgp -c gpg.program=gpg verify-tag --raw "refs/tags/$ref" 2>&1) || {
+        echo "Release signature verification failed. Nothing was built or installed."; return 1;
+    }
+    printf '%s\n' "$signature" | grep -Eq "^\[GNUPG:\] VALIDSIG $fingerprint " || {
+        echo "Release was not signed by the pinned maintainer key."; return 1;
+    }
+}
+
+version_older() {
+    [[ "$1" != "$2" && "$(printf '%s\n' "$1" "$2" | sort -V | head -1)" == "$1" ]]
+}
+
+check_version() {
+    local requested="$1" minimum="$2"
+    if version_older "$requested" "$minimum" && [[ "${BLINKER_ALLOW_DOWNGRADE:-0}" != 1 ]]; then
+        echo "Refusing $requested: minimum accepted version is $minimum."
+        echo "For an intentional rollback only, set BLINKER_ALLOW_DOWNGRADE=1."
+        return 1
+    fi
+}
 
 # Everything lives in main(), which only runs on the last line, so a download that is cut off
 # halfway runs nothing at all.
@@ -43,6 +78,15 @@ main() {
         echo "Only signed release tags (vX.Y.Z) may be installed. Build development branches manually."
         exit 1
     }
+    # Never silently go below this installer's security baseline or an installed version.
+    check_version "$ref" v0.1.3 || exit 1
+    local installed app
+    for app in /Applications/Blinker.app "$HOME/Applications/Blinker.app"; do
+        [[ "$(defaults read "$app/Contents/Info" CFBundleIdentifier 2>/dev/null || true)" == io.github.guneysol.blinker ]] || continue
+        installed=$(defaults read "$app/Contents/Info" CFBundleShortVersionString 2>/dev/null || true)
+        [[ "$installed" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Cannot verify installed version."; exit 1; }
+        check_version "$ref" "v$installed" || exit 1
+    done
     echo "Installing Blinker ${ref}..."
 
     dir=$(mktemp -d)
@@ -58,16 +102,7 @@ main() {
     echo no-autostart > "$keyring/gpg.conf"
     curl -fsSL https://github.com/guneysol.gpg -o "$dir/maintainer.asc"
     GNUPGHOME="$keyring" gpg --batch --quiet --import "$dir/maintainer.asc"
-    local signature
-    signature=$(GNUPGHOME="$keyring" git -C "$dir" -c gpg.format=openpgp -c gpg.program=gpg verify-tag --raw "$ref" 2>&1) || {
-        echo "Release signature verification failed. Nothing was built or installed."
-        exit 1
-    }
-    # Pinned release signer; names and GitHub account keys alone are not trusted.
-    echo "$signature" | grep -Eq '^\[GNUPG:\] VALIDSIG 9D81BD4F85757F958E1C2611897F6CFCDBEFF338 ' || {
-        echo "Release was not signed by the pinned maintainer key."
-        exit 1
-    }
+    verify_release "$dir" "$ref" "$keyring" "9D81BD4F85757F958E1C2611897F6CFCDBEFF338" || exit 1
     git -C "$dir" -c advice.detachedHead=false checkout --quiet "$ref"
     # The exact code being built. Each release's notes list its commit, so you can compare.
     echo "Building commit $(git -C "$dir" rev-parse HEAD)"
@@ -76,4 +111,4 @@ main() {
     echo "Like it? A star helps others find it: https://github.com/guneysol/blinker"
 }
 
-main "$@"
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

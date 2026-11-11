@@ -455,6 +455,7 @@ enum Place {
     /// can't block here.
     static func canRead(_ path: String) -> Bool {
         // The file system is case-insensitive, and /System/Volumes/Data is another name for /.
+        guard path.hasPrefix("/"), !path.split(separator: "/").contains("..") else { return false }
         var p = path.lowercased()
         if p.hasPrefix("/system/volumes/data/") { p = String(p.dropFirst("/system/volumes/data".count)) }
         if protected.contains(where: { p == $0 || p.hasPrefix($0 + "/") }) { return false }
@@ -462,7 +463,11 @@ enum Place {
         return isOnLocalMount(path)
     }
 
+    private static let mountLock = NSLock()
+
     private static func isOnLocalMount(_ path: String) -> Bool {
+        mountLock.lock()
+        defer { mountLock.unlock() }
         var mounts: UnsafeMutablePointer<statfs>?
         let count = Int(getmntinfo(&mounts, MNT_NOWAIT))
         guard count > 0, let mounts else { return false }
@@ -477,48 +482,93 @@ enum Place {
         return best.local
     }
 
+    /// Pure lexical normalization: Foundation URL standardization can consult symlinks.
+    private static func lexicalPath(_ path: String, relativeTo base: String = "/") -> String {
+        var parts: [Substring] = []
+        let absolute = path.hasPrefix("/") ? path : base + "/" + path
+        for part in absolute.split(separator: "/") {
+            if part == "." { continue }
+            if part == ".." { if !parts.isEmpty { parts.removeLast() } }
+            else { parts.append(part) }
+        }
+        return "/" + parts.joined(separator: "/")
+    }
+
     /// The checkout root and current branch. Reads at most two small files, no `git` process.
     static func gitCheckout(containing path: String) -> (String, String?)? {
-        var dir = URL(fileURLWithPath: path).standardizedFileURL
+        var dir = lexicalPath(path)
         for _ in 0..<64 {
-            let dotGit = dir.appendingPathComponent(".git")
+            let dotGit = (dir == "/" ? "" : dir) + "/.git"
             var st = stat()
-            if lstat(dotGit.path, &st) == 0 {
+            if let fd = openLocal(dotGit) {
+                let status = fstat(fd, &st)
+                close(fd)
+                guard status == 0 else { return (dir, nil) }
                 var gitDir = dotGit
                 switch st.st_mode & S_IFMT {
                 case S_IFDIR: break
                 case S_IFREG: // a worktree or submodule: ".git" holds "gitdir: <path>"
-                    guard let line = readSmall(dotGit.path), line.hasPrefix("gitdir: ") else { return (dir.path, nil) }
+                    guard let line = readSmall(dotGit), line.hasPrefix("gitdir: ") else { return (dir, nil) }
                     let target = String(line.dropFirst(8)).trimmingCharacters(in: .whitespacesAndNewlines)
-                    gitDir = URL(fileURLWithPath: target, relativeTo: dir).standardizedFileURL.resolvingSymlinksInPath()
-                    guard canRead(gitDir.path) else { return (dir.path, nil) }
-                default: return (dir.path, nil)
+                    gitDir = lexicalPath(target, relativeTo: dir)
+                    guard canRead(gitDir) else { return (dir, nil) }
+                default: return (dir, nil)
                 }
-                let head = readSmall(gitDir.appendingPathComponent("HEAD").path)?
+                let head = readSmall(gitDir + "/HEAD")?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 let branch = head.flatMap { $0.hasPrefix("ref: refs/heads/") ? String($0.dropFirst(16)) : nil }
-                return (dir.path, branch)
+                return (dir, branch)
+            } else if errno != ENOENT {
+                return nil // unsafe metadata must not borrow a parent checkout’s branch
             }
-            let parent = dir.deletingLastPathComponent()
-            if parent.path == dir.path { return nil }
+            let parent = "/" + dir.split(separator: "/").dropLast().joined(separator: "/")
+            if parent == dir { return nil }
             dir = parent
         }
         return nil
     }
 
-    /// First 4 KB of a regular file. Checked before opening, so a device node or FIFO is never
-    /// opened, and again after, in case it was swapped in between.
-    private static func readSmall(_ path: String) -> String? {
-        var st = stat()
-        guard lstat(path, &st) == 0, (st.st_mode & S_IFMT) == S_IFREG else { return nil }
-        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+    /// Walk from a directory descriptor, rejecting symlinks at every component.
+    /// Policy checks happen before filesystem access. No realpath/symlink resolution.
+    private static func openLocal(_ path: String) -> Int32? {
+        guard canRead(path) else { errno = EACCES; return nil }
+        let parts = path.split(separator: "/").map(String.init)
+        guard !parts.isEmpty, !parts.contains("."), !parts.contains("..") else { errno = EACCES; return nil }
+        var fd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         guard fd >= 0 else { return nil }
+        var prefix = ""
+        for (i, part) in parts.enumerated() {
+            prefix += "/" + part
+            guard canRead(prefix) else { close(fd); errno = EACCES; return nil }
+            var st = stat()
+            guard fstatat(fd, part, &st, AT_SYMLINK_NOFOLLOW) == 0 else {
+                let error = errno; close(fd); errno = error; return nil
+            }
+            guard [S_IFDIR, S_IFREG].contains(st.st_mode & S_IFMT) else { close(fd); errno = EACCES; return nil }
+            let flags = O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC | (i < parts.count - 1 ? O_DIRECTORY : 0)
+            let next = openat(fd, part, flags)
+            close(fd)
+            guard next >= 0 else { return nil }
+            var mount = statfs()
+            guard fstatfs(next, &mount) == 0, mount.f_flags & UInt32(MNT_LOCAL) != 0 else {
+                close(next); return nil
+            }
+            fd = next
+        }
+        return fd
+    }
+
+    /// First 4 KB of a regular local file; intermediate and final symlinks are rejected.
+    private static func readSmall(_ path: String) -> String? {
+        guard let fd = openLocal(path) else { return nil }
         defer { close(fd) }
+        var st = stat()
         guard fstat(fd, &st) == 0, (st.st_mode & S_IFMT) == S_IFREG else { return nil }
         var buf = [UInt8](repeating: 0, count: 4096)
         let n = read(fd, &buf, buf.count)
         return n > 0 ? String(decoding: buf[..<n], as: UTF8.self) : nil
     }
+
 }
 
 // MARK: - Making untrusted text safe to show
