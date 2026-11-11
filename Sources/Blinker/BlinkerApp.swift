@@ -91,7 +91,7 @@ enum Snapshot {
 
 /// Debug commands. They print to stdout and never send anything anywhere.
 enum CLI {
-    static let version = "0.1.2"
+    static let version = "0.1.3"
 
     static func help() {
         print("""

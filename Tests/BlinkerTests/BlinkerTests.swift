@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import Testing
 @testable import Blinker
 
@@ -325,5 +326,44 @@ extension Request {
         _ = wait.refreshRequests([])
         #expect(Store.notificationText(wait).title.contains("don’t touch"))
         #expect(Store.notificationText(wait).body.contains("times out"))
+    }
+}
+
+@Suite struct LocalFileBoundaries {
+    @Test func checkoutReadsRejectSymlinksAndSpecialFiles() throws {
+        let fm = FileManager.default
+        let root = URL(fileURLWithPath: "/private/tmp").appendingPathComponent("blinker-files-" + UUID().uuidString)
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        let metadata = root.appendingPathComponent("metadata")
+        let checkout = root.appendingPathComponent("checkout")
+        try fm.createDirectory(at: metadata, withIntermediateDirectories: true)
+        try fm.createDirectory(at: checkout, withIntermediateDirectories: true)
+        let head = metadata.appendingPathComponent("HEAD")
+        try "ref: refs/heads/safe\n".write(to: head, atomically: true, encoding: .utf8)
+        let dotGit = checkout.appendingPathComponent(".git")
+        try "gitdir: ../metadata\n".write(to: dotGit, atomically: true, encoding: .utf8)
+        #expect(Place.gitCheckout(containing: checkout.path)?.1 == "safe")
+        let alias = root.appendingPathComponent("alias")
+        try fm.createSymbolicLink(at: alias, withDestinationURL: metadata)
+        try "gitdir: ../alias\n".write(to: dotGit, atomically: true, encoding: .utf8)
+        #expect(Place.gitCheckout(containing: checkout.path)?.1 == nil)
+        try "gitdir: /Volumes/unavailable/repo\n".write(to: dotGit, atomically: true, encoding: .utf8)
+        #expect(Place.gitCheckout(containing: checkout.path)?.1 == nil)
+        let parentGit = root.appendingPathComponent(".git")
+        try fm.createDirectory(at: parentGit, withIntermediateDirectories: true)
+        try "ref: refs/heads/parent\n".write(to: parentGit.appendingPathComponent("HEAD"), atomically: true, encoding: .utf8)
+        try fm.removeItem(at: dotGit)
+        try fm.createSymbolicLink(at: dotGit, withDestinationURL: metadata)
+        #expect(Place.gitCheckout(containing: checkout.path)?.1 == nil)
+        try fm.removeItem(at: dotGit)
+        try fm.createDirectory(at: dotGit, withIntermediateDirectories: true)
+        let target = dotGit.appendingPathComponent("HEAD")
+        try fm.createSymbolicLink(at: target, withDestinationURL: head)
+        #expect(Place.gitCheckout(containing: checkout.path)?.1 == nil)
+        try fm.removeItem(at: target)
+        #expect(mkfifo(target.path, 0o600) == 0)
+        #expect(Place.gitCheckout(containing: checkout.path)?.1 == nil)
+        #expect(!Place.canRead(NSHomeDirectory() + "/code/../Documents/private"))
     }
 }

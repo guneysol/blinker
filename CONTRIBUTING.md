@@ -30,7 +30,20 @@ its own events, without any commands or paths:
 `log stream --level info --predicate 'subsystem == "io.github.guneysol.blinker"'`.
 
 Never paste real `--who`, `--watch` or non-demo `--snapshot` output into issues or PRs without checking it first. It
-includes commands, project paths and branch names.
+includes project paths, branch names and requester metadata.
+
+## Local release verification
+
+No GitHub Actions or paid CI is required or configured. Run on your Mac:
+
+```bash
+bash scripts/check-release.sh
+```
+
+Requires Python 3 and GnuPG in addition to the Swift toolchain. Installer tests use a temporary
+keyring and disposable signed fixtures; they do not use your signing key or install anything.
+The check builds the app and verifies its bundle signature. Keep output with the draft release.
+See [the v0.1.3 release checklist](docs/releases/v0.1.3.md) for manual hardware and publication steps.
 
 ## Where things live
 

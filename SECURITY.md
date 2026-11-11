@@ -11,10 +11,11 @@ You'll be credited unless you'd rather not be.
 
 ## What you can rely on
 
-- **The "key is waiting" signal.** Blinker only accepts log lines written by Apple's smart-card
-  driver (`/System/Library/CryptoTokenKit/usbsmartcardreaderd.slotd/…`). That path is protected
-  by System Integrity Protection, so no other program can produce them.
-- **No network.** Blinker makes no network connections.
+- **Driver-origin detection.** Blinker filters log lines to Apple’s smart-card driver under
+  SIP-protected `/System`. Time extensions are a heuristic for a touch wait; they do not
+  authenticate the pending operation, requester, or particular key.
+- **No telemetry or network client in the app.** The installer downloads source and a public
+  signing key. App menu links open in the browser when clicked.
 - **No privileges.** It runs as you, never asks for sudo, requests no accessibility, screen
   recording or disk access, and can only signal your own processes.
 - **Stop requests termination of the selected process.** Stop works only while the key is still waiting. It
@@ -62,3 +63,18 @@ your key for an action you didn't start**, whatever the notification says.
   through a trusted channel. A compromised mutable installer can bypass its own checks.
 - The installer builds the newest `vX.Y.Z` tag from source and never downloads a prebuilt binary.
 - Only the latest release is supported. To update, run the install command again.
+
+## Filesystem and release checks
+
+Git metadata access checks the path before filesystem operations, opens each component relative
+to a directory descriptor, rejects symlinks, and checks the opened filesystem is local. Unsafe
+or unavailable paths simply have no branch label. OS permissions still apply; a privileged
+attacker changing mounts or the filesystem is outside this threat model.
+
+The installer rejects unsigned/lightweight tags, mismatched signed tag names, non-commit tag
+targets and signatures from any other key. It refuses versions below its security baseline or
+an installed Blinker version. `BLINKER_ALLOW_DOWNGRADE=1` deliberately permits a rollback;
+signature and tag-name checks still apply. A pinned installer does not prove that instructions
+copied from a look-alike repository are authentic, nor independently prove release freshness.
+
+Validation runs locally with `bash scripts/check-release.sh`; no paid CI is configured.
