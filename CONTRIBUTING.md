@@ -12,7 +12,7 @@ swift test             # parsing, spoofing and redaction tests
 ```
 
 You need macOS 14 or later and Xcode 16 (or its Command Line Tools). The build must stay free of
-warnings: CI builds with `-warnings-as-errors`.
+warnings: check locally with `swift build -c release -Xswiftc -warnings-as-errors`.
 
 ### Debug commands
 

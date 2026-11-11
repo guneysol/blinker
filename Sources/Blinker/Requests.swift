@@ -7,7 +7,7 @@ import Foundation
 /// argv, working directory), so it is a hint, never proof. `knownLocation` says whether the
 /// executable lives where real tools are installed, and is the one signal argv can't fake.
 struct Request: Identifiable, Equatable {
-    let id = UUID()
+    var id = UUID()
     let pid: pid_t
     let started: Date
     /// Full path of the executable, from the kernel.
@@ -325,10 +325,14 @@ enum SSH {
 
     static func parse(_ argv: [String]) -> Call? {
         var i = 1, rerouted = false, forwards = false
+        var destination: String?
         while i < argv.count {
             let a = argv[i]
             if a == "--" { i += 1; break }
-            guard a.hasPrefix("-"), a.count > 1 else { break }
+            guard a.hasPrefix("-"), a.count > 1 else {
+                if destination == nil { destination = a; i += 1; continue }
+                break
+            }
             // "-p22" carries its value; "-p" takes the next argument; "-vT" are flags.
             let flags = a.dropFirst()
             let valuedAt = flags.firstIndex(where: { valued.contains($0) })
@@ -353,10 +357,14 @@ enum SSH {
                 i += 1
             }
         }
-        guard i < argv.count else { return nil }
-        let destination = argv[i]
+        if destination == nil {
+            guard i < argv.count else { return nil }
+            destination = argv[i]
+            i += 1
+        }
+        guard i <= argv.count, let destination else { return nil }
         let host = destination.split(separator: "@").last.map(String.init) ?? destination
-        return Call(host: host, remoteCommand: Array(argv[(i + 1)...]), rerouted: rerouted, forwardsAgent: forwards)
+        return Call(host: host, remoteCommand: Array(argv[i...]), rerouted: rerouted, forwardsAgent: forwards)
     }
 }
 
@@ -611,7 +619,7 @@ extension Request {
     var warnings: [String] {
         var out: [String] = []
         if !knownLocation { out.append("Unusual program: \(exe)") }
-        if let host, host.hasSuffix(")") { out.append("Server: \(host)") }
+        if let host { out.append(host.hasSuffix(")") ? "Server: \(host)" : "SSH destination unverified: \(host) (configuration may override it)") }
         if let launcher { out.append("Started from a temporary folder: \(launcher)") }
         return out
     }
